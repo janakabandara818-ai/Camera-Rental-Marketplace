@@ -9,6 +9,8 @@ import { Navbar } from './components/common/Navbar';
 import { Footer } from './components/common/Footer';
 import { ToastContainer } from './components/common/ToastContainer';
 import { ListGearModal } from './components/common/ListGearModal';
+
+// Pages
 import { HomePage } from './pages/HomePage';
 import { ProductsPage } from './pages/ProductsPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
@@ -22,6 +24,7 @@ function AppContent() {
   const [listGearOpen, setListGearOpen] = useState(false);
   const location = useLocation();
 
+  // Scroll to top on route change
   React.useEffect(() => {
     window.scrollTo(0, 0);
   }, [location.pathname]);
@@ -29,8 +32,9 @@ function AppContent() {
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#111827] text-white">
+    <div className="min-h-screen flex flex-col bg-[#111827] text-white selection:bg-amber-500 selection:text-black">
       {!isAuthPage && <Navbar onOpenListGearModal={() => setListGearOpen(true)} />}
+
       <main className="flex-1">
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -42,10 +46,13 @@ function AppContent() {
           <Route path="/admin" element={<AdminDashboardPage />} />
           <Route path="/cart" element={<CartCheckoutPage />} />
           <Route path="/checkout" element={<CartCheckoutPage />} />
+          {/* Fallback to home */}
           <Route path="*" element={<HomePage />} />
         </Routes>
       </main>
+
       {!isAuthPage && <Footer />}
+
       <ToastContainer />
       <ListGearModal isOpen={listGearOpen} onClose={() => setListGearOpen(false)} />
     </div>
