@@ -33,7 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenListGearModal }) => {
             C
           </span>
           <span className="font-display tracking-wider text-xl uppercase">
-            Cine<span className="text-amber-500">Vault</span>
+            Camera <span className="text-amber-500">&amp;</span> Gear
           </span>
         </Link>
 

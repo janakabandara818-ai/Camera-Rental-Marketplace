@@ -61,7 +61,7 @@ export const Footer: React.FC = () => {
                 C
               </span>
               <span className="font-display tracking-wider uppercase text-lg">
-                Cine<span className="text-amber-500">Vault</span>
+                Camera <span className="text-amber-500">&amp;</span> Gear
               </span>
             </Link>
             <p className="text-xs sm:text-sm text-gray-400 max-w-sm leading-relaxed">
@@ -108,7 +108,7 @@ export const Footer: React.FC = () => {
 
         <div className="mt-12 pt-6 border-t border-gray-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
           <div>
-            &copy; {new Date().getFullYear()} CineVault Inc. Camera & Equipment Rental and Marketplace. All rights reserved.
+            &copy; {new Date().getFullYear()} Camera & Equipment Rental and Marketplace Camera & Equipment Rental and Marketplace. All rights reserved.
           </div>
           <div className="flex items-center gap-6">
             <span>Privacy Policy</span>

@@ -53,7 +53,7 @@ export const LoginPage: React.FC = () => {
             C
           </span>
           <span className="font-display tracking-wider uppercase text-2xl text-white font-bold">
-            Cine<span className="text-amber-500">Vault</span>
+            Camera <span className="text-amber-500">&amp;</span> Gear
           </span>
         </Link>
         <h2 className="text-2xl font-bold tracking-tight text-white font-display">
@@ -137,7 +137,7 @@ export const LoginPage: React.FC = () => {
               isLoading={loading}
               className="w-full"
             >
-              Sign In to CineVault
+              Sign In to Camera & Gear
             </Button>
           </form>
 
