@@ -1,631 +1,302 @@
-import React, { useState } from 'react';
-import { useEquipment } from '../context/EquipmentContext';
-import { useAuth } from '../context/AuthContext';
-import { Product, GearCategory } from '../types';
-import { Button } from '../components/common/Button';
-import { Modal } from '../components/common/Modal';
-import { MOCK_USERS } from '../data/mockData';
-import {
-  Package,
-  Users,
-  DollarSign,
-  TrendingUp,
-  Plus,
-  Trash2,
-  Edit2,
-  ShieldCheck,
-  CheckCircle2,
-  Clock,
-  Search,
-  Filter
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getProducts, createProduct, updateProduct, deleteProduct } from '../services/productService';
 
-export const AdminDashboardPage: React.FC = () => {
-  const { products, rentals, orders, addProduct, updateProduct, deleteProduct } = useEquipment();
-  const { user } = useAuth();
-
-  const [activeTab, setActiveTab] = useState<'inventory' | 'orders' | 'users'>('inventory');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-
-  // New product form state
-  const [formData, setFormData] = useState({
-    name: '',
-    brand: 'Sony',
-    category: 'Cameras' as GearCategory,
-    rentPrice: '220',
-    buyPrice: '5200',
-    status: 'Available' as Product['status'],
-    condition: 'Production Certified' as Product['condition'],
-    location: 'Los Angeles Vault',
-    tagline: '',
-    description: ''
+export function AdminDashboardPage() {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editProduct, setEditProduct] = useState<any>(null);
+  const [form, setForm] = useState({
+    name: '', description: '', category: 'camera',
+    type: 'both', rentPrice: '', sellPrice: '', image: '', available: true
   });
+  const navigate = useNavigate();
 
-  const handleCreateProduct = (e: React.FormEvent) => {
-    e.preventDefault();
-    addProduct({
-      name: formData.name,
-      brand: formData.brand,
-      category: formData.category,
-      tagline: formData.tagline || `Certified ${formData.brand} ${formData.category} cinema kit`,
-      description: formData.description || 'Full production package with accessories and rugged case.',
-      images: [products[0]?.images[0] || ''],
-      rentPricePerDay: Number(formData.rentPrice) || 150,
-      buyPrice: Number(formData.buyPrice) || 4000,
-      rating: 5.0,
-      reviewCount: 0,
-      availableForRent: true,
-      availableForSale: true,
-      status: formData.status,
-      condition: formData.condition,
-      location: formData.location,
-      depositRequired: Math.round(Number(formData.rentPrice) * 3) || 500,
-      specs: [
-        { label: 'Category', value: formData.category },
-        { label: 'Brand', value: formData.brand },
-        { label: 'Condition', value: formData.condition }
-      ],
-      includedInCase: ['Main Unit', 'Hard Flight Case', 'Power Supplies']
-    });
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    if (user.role !== 'admin') { navigate('/'); return; }
+    fetchProducts();
+  }, []);
 
-    setIsAddModalOpen(false);
-    setFormData({
-      name: '',
-      brand: 'Sony',
-      category: 'Cameras',
-      rentPrice: '220',
-      buyPrice: '5200',
-      status: 'Available',
-      condition: 'Production Certified',
-      location: 'Los Angeles Vault',
-      tagline: '',
-      description: ''
-    });
+  const fetchProducts = async () => {
+    try {
+      const data = await getProducts();
+      setProducts(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleUpdateProduct = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingProduct) return;
-    updateProduct(editingProduct.id, {
-      name: editingProduct.name,
-      brand: editingProduct.brand,
-      rentPricePerDay: Number(editingProduct.rentPricePerDay),
-      buyPrice: Number(editingProduct.buyPrice),
-      status: editingProduct.status
-    });
-    setEditingProduct(null);
+    try {
+      if (editProduct) {
+        await updateProduct(editProduct._id, form);
+      } else {
+        await createProduct(form);
+      }
+      setShowModal(false);
+      setEditProduct(null);
+      setForm({ name: '', description: '', category: 'camera', type: 'both', rentPrice: '', sellPrice: '', image: '', available: true });
+      fetchProducts();
+    } catch (err) {
+      alert('Failed to save product');
+    }
   };
 
-  // Filtered inventory
-  const filteredProducts = products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.category.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const handleEdit = (product: any) => {
+    setEditProduct(product);
+    setForm({
+      name: product.name,
+      description: product.description,
+      category: product.category,
+      type: product.type,
+      rentPrice: product.rentPrice || '',
+      sellPrice: product.sellPrice || '',
+      image: product.image || '',
+      available: product.available
+    });
+    setShowModal(true);
+  };
 
-  // Revenue calculation
-  const totalRevenue =
-    rentals.reduce((sum, r) => sum + r.totalAmount, 0) +
-    orders.reduce((sum, o) => sum + o.totalAmount, 0);
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this product?')) return;
+    try {
+      await deleteProduct(id);
+      fetchProducts();
+    } catch (err) {
+      alert('Failed to delete product');
+    }
+  };
 
-  return (
-    <div className="min-h-screen bg-[#111827] py-8 sm:py-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Admin Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-8 border-b border-gray-800 gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-mono text-amber-500 uppercase tracking-wider mb-1">
-              <ShieldCheck className="w-4 h-4 text-amber-500" />
-              <span>CineVault Central Management Console</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white font-display">
-              Operations & Inventory Dashboard
-            </h1>
-          </div>
-
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() => setIsAddModalOpen(true)}
-            icon={<Plus className="w-4 h-4" />}
-          >
-            Add New Equipment
-          </Button>
-        </div>
-
-        {/* 4 Stats Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 my-8">
-          <div className="bg-[#161f30] p-5 rounded-xl border border-gray-800">
-            <div className="flex items-center justify-between text-gray-400 mb-2">
-              <span className="text-xs uppercase font-medium">Inventory Items</span>
-              <Package className="w-4 h-4 text-amber-500" />
-            </div>
-            <div className="text-2xl font-bold text-white font-mono tabular-nums">
-              {products.length}
-            </div>
-            <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-mono">
-              <TrendingUp className="w-3 h-3" />
-              <span>100% In Service</span>
-            </div>
-          </div>
-
-          <div className="bg-[#161f30] p-5 rounded-xl border border-gray-800">
-            <div className="flex items-center justify-between text-gray-400 mb-2">
-              <span className="text-xs uppercase font-medium">Active Rentals</span>
-              <Clock className="w-4 h-4 text-amber-500" />
-            </div>
-            <div className="text-2xl font-bold text-white font-mono tabular-nums">
-              {rentals.filter((r) => r.status === 'Active').length}
-            </div>
-            <div className="text-[11px] text-gray-400 mt-1 font-mono">
-              {rentals.filter((r) => r.status === 'Upcoming').length} Upcoming Dispatches
-            </div>
-          </div>
-
-          <div className="bg-[#161f30] p-5 rounded-xl border border-gray-800">
-            <div className="flex items-center justify-between text-gray-400 mb-2">
-              <span className="text-xs uppercase font-medium">Gross Platform GMV</span>
-              <DollarSign className="w-4 h-4 text-amber-500" />
-            </div>
-            <div className="text-2xl font-bold text-amber-400 font-mono tabular-nums">
-              ${totalRevenue.toLocaleString()}
-            </div>
-            <div className="text-[11px] text-emerald-400 mt-1 font-mono">
-              +18.4% vs last 30 days
-            </div>
-          </div>
-
-          <div className="bg-[#161f30] p-5 rounded-xl border border-gray-800">
-            <div className="flex items-center justify-between text-gray-400 mb-2">
-              <span className="text-xs uppercase font-medium">Verified Accounts</span>
-              <Users className="w-4 h-4 text-amber-500" />
-            </div>
-            <div className="text-2xl font-bold text-white font-mono tabular-nums">
-              1,420
-            </div>
-            <div className="text-[11px] text-emerald-400 mt-1 font-mono">
-              100% ID Verified
-            </div>
-          </div>
-        </div>
-
-        {/* Tab Controls */}
-        <div className="flex items-center gap-2 p-1 bg-[#161f30] rounded-xl border border-gray-800 mb-6 max-w-md">
-          <button
-            onClick={() => setActiveTab('inventory')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-              activeTab === 'inventory'
-                ? 'bg-amber-500 text-black shadow-sm'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Equipment Inventory ({products.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('orders')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-              activeTab === 'orders'
-                ? 'bg-amber-500 text-black shadow-sm'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            All Bookings & Orders
-          </button>
-          <button
-            onClick={() => setActiveTab('users')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-              activeTab === 'users'
-                ? 'bg-amber-500 text-black shadow-sm'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Filmmaker Accounts
-          </button>
-        </div>
-
-        {/* Tab 1: Equipment Inventory Table */}
-        {activeTab === 'inventory' && (
-          <div className="bg-[#161f30] rounded-xl border border-gray-800 overflow-hidden">
-            {/* Search filter in table */}
-            <div className="p-4 border-b border-gray-800 flex items-center justify-between gap-4">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Filter inventory by name or brand..."
-                  className="w-full bg-[#0d131f] border border-gray-700 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-              <div className="text-xs text-gray-400 font-mono tabular-nums">
-                {filteredProducts.length} items cataloged
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-[#0d131f] text-gray-400 uppercase font-mono border-b border-gray-800">
-                  <tr>
-                    <th className="py-3 px-4">Equipment</th>
-                    <th className="py-3 px-4">Category</th>
-                    <th className="py-3 px-4">Daily Rent</th>
-                    <th className="py-3 px-4">Buy Price</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Location</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800/80 text-gray-300">
-                  {filteredProducts.map((p) => (
-                    <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
-                      <td className="py-3 px-4 flex items-center gap-3">
-                        <img
-                          src={p.images[0]}
-                          alt={p.name}
-                          referrerPolicy="no-referrer"
-                          className="w-10 h-8 rounded object-cover bg-black shrink-0"
-                        />
-                        <div>
-                          <div className="font-semibold text-white truncate max-w-xs">{p.name}</div>
-                          <div className="text-[11px] text-gray-500 font-mono">{p.brand} · {p.condition}</div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 font-medium text-white">{p.category}</td>
-                      <td className="py-3 px-4 font-mono font-bold text-amber-400 tabular-nums">
-                        ${p.rentPricePerDay}/day
-                      </td>
-                      <td className="py-3 px-4 font-mono text-gray-300 tabular-nums">
-                        ${p.buyPrice.toLocaleString()}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono ${
-                            p.status === 'Available'
-                              ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-amber-950/60 text-amber-400 border border-amber-500/30'
-                          }`}
-                        >
-                          {p.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-gray-400 truncate max-w-32">{p.location}</td>
-                      <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
-                        <button
-                          onClick={() => setEditingProduct(p)}
-                          className="p-1.5 text-gray-400 hover:text-amber-400 hover:bg-gray-800 rounded transition-colors"
-                          title="Edit gear"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (confirm(`Remove ${p.name} from inventory?`)) {
-                              deleteProduct(p.id);
-                            }
-                          }}
-                          className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-800 rounded transition-colors"
-                          title="Delete gear"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 2: All Bookings & Orders Table */}
-        {activeTab === 'orders' && (
-          <div className="bg-[#161f30] rounded-xl border border-gray-800 overflow-hidden">
-            <div className="p-4 border-b border-gray-800 font-semibold text-white text-sm">
-              All Active Production Rentals & Purchases
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-[#0d131f] text-gray-400 uppercase font-mono border-b border-gray-800">
-                  <tr>
-                    <th className="py-3 px-4">Order / Rental Ref</th>
-                    <th className="py-3 px-4">Equipment</th>
-                    <th className="py-3 px-4">Client / Production</th>
-                    <th className="py-3 px-4">Period / Date</th>
-                    <th className="py-3 px-4">Amount</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Tracking Code</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800/80 text-gray-300">
-                  {rentals.map((r) => (
-                    <tr key={r.id} className="hover:bg-gray-800/30">
-                      <td className="py-3 px-4 font-mono font-semibold text-amber-500">{r.id}</td>
-                      <td className="py-3 px-4 font-medium text-white">{r.product.name}</td>
-                      <td className="py-3 px-4 text-gray-300">Janaka Bandara (Light & Lens)</td>
-                      <td className="py-3 px-4 text-gray-400">{r.startDate} to {r.endDate}</td>
-                      <td className="py-3 px-4 font-mono font-bold text-white tabular-nums">${r.totalAmount.toLocaleString()}</td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950/60 text-emerald-400 border border-emerald-500/30">
-                          {r.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-mono text-gray-400">{r.trackingNumber}</td>
-                    </tr>
-                  ))}
-                  {orders.map((o) => (
-                    <tr key={o.id} className="hover:bg-gray-800/30">
-                      <td className="py-3 px-4 font-mono font-semibold text-blue-400">{o.id}</td>
-                      <td className="py-3 px-4 font-medium text-white">{o.product.name}</td>
-                      <td className="py-3 px-4 text-gray-300">Janaka Bandara</td>
-                      <td className="py-3 px-4 text-gray-400">{o.orderDate}</td>
-                      <td className="py-3 px-4 font-mono font-bold text-white tabular-nums">${o.totalAmount.toLocaleString()}</td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-950/60 text-blue-400 border border-blue-500/30">
-                          {o.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-mono text-gray-400">{o.trackingNumber}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 3: Users Table */}
-        {activeTab === 'users' && (
-          <div className="bg-[#161f30] rounded-xl border border-gray-800 overflow-hidden">
-            <div className="p-4 border-b border-gray-800 font-semibold text-white text-sm">
-              Registered Filmmakers & Equipment Vendors
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-[#0d131f] text-gray-400 uppercase font-mono border-b border-gray-800">
-                  <tr>
-                    <th className="py-3 px-4">Name / Company</th>
-                    <th className="py-3 px-4">Email Address</th>
-                    <th className="py-3 px-4">Role</th>
-                    <th className="py-3 px-4">COI Verification</th>
-                    <th className="py-3 px-4">Rental Credits</th>
-                    <th className="py-3 px-4 text-right">Access Level</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800/80 text-gray-300">
-                  {MOCK_USERS.map((u) => (
-                    <tr key={u.id} className="hover:bg-gray-800/30">
-                      <td className="py-3 px-4">
-                        <div className="font-semibold text-white">{u.name}</div>
-                        <div className="text-[11px] text-gray-500">{u.company}</div>
-                      </td>
-                      <td className="py-3 px-4 font-mono text-gray-400">{u.email}</td>
-                      <td className="py-3 px-4 capitalize">{u.role}</td>
-                      <td className="py-3 px-4">
-                        <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>Active COI</span>
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-mono text-amber-400 tabular-nums">${u.credits}</td>
-                      <td className="py-3 px-4 text-right font-mono text-gray-400">{u.role === 'admin' ? 'Super Admin' : 'Filmmaker'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Add New Equipment Modal */}
-      <Modal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        title="Catalog New Cinema Equipment"
-        maxWidth="2xl"
-      >
-        <form onSubmit={handleCreateProduct} className="space-y-4 text-xs">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Equipment Name *</label>
-              <input
-                type="text"
-                required
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g. Sony FX9 Cinema Camera Package"
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Brand *</label>
-              <input
-                type="text"
-                required
-                value={formData.brand}
-                onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Category</label>
-              <select
-                value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value as GearCategory })}
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white"
-              >
-                <option value="Cameras">Cameras</option>
-                <option value="Lenses">Lenses</option>
-                <option value="Lighting">Lighting</option>
-                <option value="Stabilizers">Stabilizers</option>
-                <option value="Audio">Audio</option>
-                <option value="Accessories">Accessories</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Daily Rent ($) *</label>
-              <input
-                type="number"
-                required
-                value={formData.rentPrice}
-                onChange={(e) => setFormData({ ...formData, rentPrice: e.target.value })}
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Buy Price ($)</label>
-              <input
-                type="number"
-                value={formData.buyPrice}
-                onChange={(e) => setFormData({ ...formData, buyPrice: e.target.value })}
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Condition</label>
-              <select
-                value={formData.condition}
-                onChange={(e) => setFormData({ ...formData, condition: e.target.value as any })}
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white"
-              >
-                <option value="Brand New">Brand New</option>
-                <option value="Like New (Mint)">Like New (Mint)</option>
-                <option value="Production Certified">Production Certified</option>
-                <option value="Good">Good</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Vault Location</label>
-              <input
-                type="text"
-                value={formData.location}
-                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-gray-400 uppercase font-semibold mb-1">Tagline</label>
-            <input
-              type="text"
-              value={formData.tagline}
-              onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
-              placeholder="e.g. 6K Full-frame sensor with dual base ISO"
-              className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white"
-            />
-          </div>
-
-          <div className="pt-3 border-t border-gray-800 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsAddModalOpen(false)}
-              className="px-4 py-2 text-gray-400 hover:text-white"
-            >
-              Cancel
-            </button>
-            <Button type="submit" variant="primary" size="sm">
-              Save & Add to Catalog
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Edit Equipment Modal */}
-      <Modal
-        isOpen={!!editingProduct}
-        onClose={() => setEditingProduct(null)}
-        title="Edit Inventory Details"
-        maxWidth="md"
-      >
-        {editingProduct && (
-          <form onSubmit={handleUpdateProduct} className="space-y-4 text-xs">
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Equipment Name</label>
-              <input
-                type="text"
-                value={editingProduct.name}
-                onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-gray-400 uppercase font-semibold mb-1">Daily Rent ($)</label>
-                <input
-                  type="number"
-                  value={editingProduct.rentPricePerDay}
-                  onChange={(e) =>
-                    setEditingProduct({
-                      ...editingProduct,
-                      rentPricePerDay: Number(e.target.value)
-                    })
-                  }
-                  className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 uppercase font-semibold mb-1">Buy Price ($)</label>
-                <input
-                  type="number"
-                  value={editingProduct.buyPrice}
-                  onChange={(e) =>
-                    setEditingProduct({
-                      ...editingProduct,
-                      buyPrice: Number(e.target.value)
-                    })
-                  }
-                  className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white font-mono"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-gray-400 uppercase font-semibold mb-1">Availability Status</label>
-              <select
-                value={editingProduct.status}
-                onChange={(e) =>
-                  setEditingProduct({
-                    ...editingProduct,
-                    status: e.target.value as any
-                  })
-                }
-                className="w-full bg-[#0d131f] border border-gray-700 rounded-lg px-3 py-2 text-white"
-              >
-                <option value="Available">Available</option>
-                <option value="On Rental">On Rental</option>
-                <option value="Reserved">Reserved</option>
-                <option value="Maintenance">Maintenance</option>
-              </select>
-            </div>
-
-            <div className="pt-3 border-t border-gray-800 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setEditingProduct(null)}
-                className="px-4 py-2 text-gray-400 hover:text-white"
-              >
-                Cancel
-              </button>
-              <Button type="submit" variant="primary" size="sm">
-                Update Gear
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
+  if (loading) return (
+    <div className="min-h-screen bg-[#111827] flex items-center justify-center">
+      <div className="text-amber-500 text-xl">Loading...</div>
     </div>
   );
-};
+
+  return (
+    <div className="min-h-screen bg-[#111827] py-12 px-4">
+      <div className="max-w-7xl mx-auto">
+
+        {/* Header */}
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-4xl font-bold text-white">Admin Dashboard</h1>
+            <p className="text-gray-400 mt-1">Manage your camera equipment</p>
+          </div>
+          <button
+            onClick={() => { setEditProduct(null); setShowModal(true); }}
+            className="bg-amber-500 hover:bg-amber-600 text-black font-bold px-6 py-3 rounded-lg"
+          >
+            + Add Product
+          </button>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+          <div className="bg-[#1F2937] rounded-xl p-6 border border-gray-700">
+            <p className="text-gray-400 text-sm">Total Products</p>
+            <p className="text-4xl font-bold text-white mt-1">{products.length}</p>
+          </div>
+          <div className="bg-[#1F2937] rounded-xl p-6 border border-gray-700">
+            <p className="text-gray-400 text-sm">Available</p>
+            <p className="text-4xl font-bold text-green-400 mt-1">
+              {products.filter((p: any) => p.available).length}
+            </p>
+          </div>
+          <div className="bg-[#1F2937] rounded-xl p-6 border border-gray-700">
+            <p className="text-gray-400 text-sm">Categories</p>
+            <p className="text-4xl font-bold text-amber-400 mt-1">4</p>
+          </div>
+        </div>
+
+        {/* Products Table */}
+        <div className="bg-[#1F2937] rounded-xl border border-gray-700 overflow-hidden">
+          <div className="p-6 border-b border-gray-700">
+            <h2 className="text-white font-bold text-xl">All Products</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-700">
+                  <th className="text-left text-gray-400 text-sm px-6 py-4">Product</th>
+                  <th className="text-left text-gray-400 text-sm px-6 py-4">Category</th>
+                  <th className="text-left text-gray-400 text-sm px-6 py-4">Rent/day</th>
+                  <th className="text-left text-gray-400 text-sm px-6 py-4">Buy Price</th>
+                  <th className="text-left text-gray-400 text-sm px-6 py-4">Status</th>
+                  <th className="text-left text-gray-400 text-sm px-6 py-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {products.map((product: any) => (
+                  <tr key={product._id} className="border-b border-gray-700/50 hover:bg-gray-700/20">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={product.image || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=50'}
+                          alt={product.name}
+                          className="w-10 h-10 rounded-lg object-cover"
+                        />
+                        <span className="text-white text-sm font-medium line-clamp-1">{product.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-amber-400 text-sm capitalize">{product.category}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-white text-sm">{product.rentPrice ? `$${product.rentPrice}` : '-'}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-white text-sm">{product.sellPrice ? `$${product.sellPrice}` : '-'}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        product.available ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                      }`}>
+                        {product.available ? 'Available' : 'Unavailable'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEdit(product)}
+                          className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-xs px-3 py-1 rounded-lg"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(product._id)}
+                          className="bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs px-3 py-1 rounded-lg"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Add/Edit Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
+          <div className="bg-[#1F2937] rounded-2xl p-6 w-full max-w-lg border border-gray-700 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-white font-bold text-xl mb-6">
+              {editProduct ? 'Edit Product' : 'Add New Product'}
+            </h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-gray-300 text-sm mb-1">Product Name</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm({...form, name: e.target.value})}
+                  className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-gray-300 text-sm mb-1">Description</label>
+                <textarea
+                  value={form.description}
+                  onChange={(e) => setForm({...form, description: e.target.value})}
+                  className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
+                  rows={3}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-gray-300 text-sm mb-1">Category</label>
+                  <select
+                    value={form.category}
+                    onChange={(e) => setForm({...form, category: e.target.value})}
+                    className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="camera">Camera</option>
+                    <option value="lens">Lens</option>
+                    <option value="lighting">Lighting</option>
+                    <option value="accessory">Accessory</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-300 text-sm mb-1">Type</label>
+                  <select
+                    value={form.type}
+                    onChange={(e) => setForm({...form, type: e.target.value})}
+                    className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="rent">Rent Only</option>
+                    <option value="sell">Sell Only</option>
+                    <option value="both">Both</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-gray-300 text-sm mb-1">Rent Price/day ($)</label>
+                  <input
+                    type="number"
+                    value={form.rentPrice}
+                    onChange={(e) => setForm({...form, rentPrice: e.target.value})}
+                    className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 text-sm mb-1">Sell Price ($)</label>
+                  <input
+                    type="number"
+                    value={form.sellPrice}
+                    onChange={(e) => setForm({...form, sellPrice: e.target.value})}
+                    className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-gray-300 text-sm mb-1">Image URL</label>
+                <input
+                  type="text"
+                  value={form.image}
+                  onChange={(e) => setForm({...form, image: e.target.value})}
+                  className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
+                  placeholder="https://..."
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.available}
+                  onChange={(e) => setForm({...form, available: e.target.checked})}
+                  className="w-4 h-4 accent-amber-500"
+                />
+                <label className="text-gray-300 text-sm">Available</label>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowModal(false); setEditProduct(null); }}
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-amber-500 hover:bg-amber-600 text-black font-bold py-2 rounded-lg"
+                >
+                  {editProduct ? 'Update' : 'Add Product'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
