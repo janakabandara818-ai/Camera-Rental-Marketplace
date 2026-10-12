@@ -6,6 +6,9 @@ export function ProductsPage() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('default');
   const [rentModal, setRentModal] = useState<any>(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -27,35 +30,33 @@ export function ProductsPage() {
   const addToCart = (product: any, type: string) => {
     const token = localStorage.getItem('token');
     if (!token) { navigate('/login'); return; }
-
     const cart = JSON.parse(localStorage.getItem('cart') || '[]');
     let totalPrice = 0;
-
     if (type === 'rent' && startDate && endDate) {
       const days = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24));
       totalPrice = days * product.rentPrice;
     } else if (type === 'buy') {
       totalPrice = product.sellPrice;
     }
-
-    cart.push({
-      productId: product._id,
-      name: product.name,
-      image: product.image,
-      type,
-      startDate,
-      endDate,
-      totalPrice,
-    });
-
+    cart.push({ productId: product._id, name: product.name, image: product.image, type, startDate, endDate, totalPrice });
     localStorage.setItem('cart', JSON.stringify(cart));
     setRentModal(null);
     navigate('/cart');
   };
 
-  const filtered = filter === 'all'
-    ? products
-    : products.filter((p: any) => p.category === filter);
+  const filtered = products
+    .filter((p: any) => {
+      const matchCategory = filter === 'all' || p.category === filter;
+      const matchType = typeFilter === 'all' || p.type === typeFilter || (typeFilter === 'rent' && p.rentPrice) || (typeFilter === 'buy' && p.sellPrice);
+      const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.description.toLowerCase().includes(search.toLowerCase());
+      return matchCategory && matchType && matchSearch;
+    })
+    .sort((a: any, b: any) => {
+      if (sortBy === 'price-low') return (a.rentPrice || a.sellPrice) - (b.rentPrice || b.sellPrice);
+      if (sortBy === 'price-high') return (b.rentPrice || b.sellPrice) - (a.rentPrice || a.sellPrice);
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+      return 0;
+    });
 
   if (loading) return (
     <div className="min-h-screen bg-[#111827] flex items-center justify-center">
@@ -67,27 +68,77 @@ export function ProductsPage() {
     <div className="min-h-screen bg-[#111827] py-12 px-4">
       <div className="max-w-7xl mx-auto">
 
-        <div className="mb-10">
+        {/* Header */}
+        <div className="mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">All Equipment</h1>
           <p className="text-gray-400">Browse our premium camera gear collection</p>
         </div>
 
-        {/* Filters */}
-        <div className="flex gap-3 mb-8 flex-wrap">
-          {['all', 'camera', 'lens', 'lighting', 'accessory'].map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setFilter(cat)}
-              className={`px-4 py-2 rounded-full text-sm font-medium capitalize transition-colors ${
-                filter === cat
-                  ? 'bg-amber-500 text-black'
-                  : 'bg-[#1F2937] text-gray-300 hover:bg-gray-700'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+        {/* Search Bar */}
+        <div className="relative mb-6">
+          <input
+            type="text"
+            placeholder="Search cameras, lenses, lighting..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-[#1F2937] border border-gray-700 text-white rounded-xl px-5 py-4 pl-12 focus:outline-none focus:border-amber-500 text-sm"
+          />
+          <svg className="absolute left-4 top-4 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-4 top-4 text-gray-400 hover:text-white">✕</button>
+          )}
         </div>
+
+        {/* Filters Row */}
+        <div className="flex flex-wrap gap-3 mb-8 items-center justify-between">
+          <div className="flex gap-2 flex-wrap">
+            {/* Category Filter */}
+            {['all', 'camera', 'lens', 'lighting', 'accessory'].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setFilter(cat)}
+                className={`px-4 py-2 rounded-full text-sm font-medium capitalize transition-colors ${
+                  filter === cat ? 'bg-amber-500 text-black' : 'bg-[#1F2937] text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex gap-3">
+            {/* Type Filter */}
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="bg-[#1F2937] border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+            >
+              <option value="all">All Types</option>
+              <option value="rent">Rent Only</option>
+              <option value="buy">Buy Only</option>
+            </select>
+
+            {/* Sort */}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="bg-[#1F2937] border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+            >
+              <option value="default">Sort By</option>
+              <option value="price-low">Price: Low to High</option>
+              <option value="price-high">Price: High to Low</option>
+              <option value="name">Name A-Z</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Results Count */}
+        <p className="text-gray-400 text-sm mb-6">
+          {filtered.length} product{filtered.length !== 1 ? 's' : ''} found
+          {search && ` for "${search}"`}
+        </p>
 
         {/* Products Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -112,32 +163,21 @@ export function ProductsPage() {
                   </span>
                 </div>
               </div>
-
               <div className="p-4">
                 <h3 className="text-white font-semibold text-sm mb-2 line-clamp-2">{product.name}</h3>
                 <p className="text-gray-400 text-xs mb-3 line-clamp-2">{product.description}</p>
                 <div className="flex gap-2 mb-4">
-                  {product.rentPrice && (
-                    <span className="text-amber-400 text-sm font-medium">${product.rentPrice}/day</span>
-                  )}
-                  {product.sellPrice && (
-                    <span className="text-gray-400 text-sm">| Buy: ${product.sellPrice}</span>
-                  )}
+                  {product.rentPrice && <span className="text-amber-400 text-sm font-medium">${product.rentPrice}/day</span>}
+                  {product.sellPrice && <span className="text-gray-400 text-sm">| Buy: ${product.sellPrice}</span>}
                 </div>
                 <div className="flex gap-2">
                   {product.rentPrice && (
-                    <button
-                      onClick={() => setRentModal(product)}
-                      className="flex-1 bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold py-2 rounded-lg transition-colors"
-                    >
+                    <button onClick={() => setRentModal(product)} className="flex-1 bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold py-2 rounded-lg transition-colors">
                       Rent Now
                     </button>
                   )}
                   {product.sellPrice && (
-                    <button
-                      onClick={() => addToCart(product, 'buy')}
-                      className="flex-1 bg-[#111827] hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg border border-gray-600 transition-colors"
-                    >
+                    <button onClick={() => addToCart(product, 'buy')} className="flex-1 bg-[#111827] hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg border border-gray-600 transition-colors">
                       Buy Now
                     </button>
                   )}
@@ -146,6 +186,17 @@ export function ProductsPage() {
             </div>
           ))}
         </div>
+
+        {filtered.length === 0 && (
+          <div className="text-center py-20">
+            <div className="text-6xl mb-4">🔍</div>
+            <h2 className="text-2xl font-bold text-white mb-2">No products found</h2>
+            <p className="text-gray-400">Try a different search or filter</p>
+            <button onClick={() => { setSearch(''); setFilter('all'); setTypeFilter('all'); }} className="mt-4 bg-amber-500 hover:bg-amber-600 text-black font-bold px-6 py-2 rounded-lg">
+              Clear Filters
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Rent Modal */}
@@ -157,23 +208,11 @@ export function ProductsPage() {
             <div className="space-y-4 mb-6">
               <div>
                 <label className="block text-gray-300 text-sm mb-1">Start Date</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  min={new Date().toISOString().split('T')[0]}
-                  className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
-                />
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} min={new Date().toISOString().split('T')[0]} className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500" />
               </div>
               <div>
                 <label className="block text-gray-300 text-sm mb-1">End Date</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  min={startDate}
-                  className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500"
-                />
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate} className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500" />
               </div>
               {startDate && endDate && (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
@@ -184,19 +223,8 @@ export function ProductsPage() {
               )}
             </div>
             <div className="flex gap-3">
-              <button
-                onClick={() => setRentModal(null)}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => addToCart(rentModal, 'rent')}
-                disabled={!startDate || !endDate}
-                className="flex-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-bold py-2 rounded-lg"
-              >
-                Add to Cart
-              </button>
+              <button onClick={() => setRentModal(null)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded-lg">Cancel</button>
+              <button onClick={() => addToCart(rentModal, 'rent')} disabled={!startDate || !endDate} className="flex-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-bold py-2 rounded-lg">Add to Cart</button>
             </div>
           </div>
         </div>
