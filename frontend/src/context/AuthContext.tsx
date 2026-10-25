@@ -1,93 +1,119 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User } from '../types';
-import { MOCK_USERS } from '../data/mockData';
-import { useToast } from './ToastContext';
+import React, { createContext, useContext, useState } from 'react';
+import { loginUser, registerUser } from '../services/authService';
+
+interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'user' | 'admin';
+  avatar?: string;
+  phone?: string;
+  company?: string;
+  verified?: boolean;
+  memberSince?: string;
+  credits?: number;
+}
+
+interface AuthSession {
+  token: string;
+  user: AuthUser;
+}
 
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
-  login: (email: string, password?: string, role?: 'admin' | 'creator') => boolean;
-  register: (name: string, email: string, role?: 'creator' | 'vendor') => boolean;
+  login: (email: string, password: string) => Promise<AuthSession>;
+  register: (
+    name: string,
+    email: string,
+    password: string
+  ) => Promise<AuthSession>;
   logout: () => void;
-  switchDemoRole: (role: 'admin' | 'creator') => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { showToast } = useToast();
-  // Default to logged-in creator for immediate rich experience
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('cinevault_user');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return MOCK_USERS[0];
-      }
-    }
-    return MOCK_USERS[0]; // Janaka Bandara
-  });
+function readSavedUser(): AuthUser | null {
+  try {
+    const token = localStorage.getItem('token');
+    const savedUser = localStorage.getItem('user');
 
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem('cinevault_user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('cinevault_user');
+    if (!token || !savedUser) {
+      return null;
     }
-  }, [user]);
 
-  const login = (email: string, _password?: string, preferredRole?: 'admin' | 'creator'): boolean => {
-    const foundUser = MOCK_USERS.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (foundUser) {
-      setUser(foundUser);
-      showToast(`Welcome back, ${foundUser.name}!`, 'success');
-      return true;
+    const parsed = JSON.parse(savedUser);
+
+    if (
+      typeof parsed?.id !== 'string' ||
+      typeof parsed?.name !== 'string' ||
+      typeof parsed?.email !== 'string' ||
+      !['user', 'admin'].includes(parsed?.role)
+    ) {
+      return null;
     }
-    // Generic fallback login with dynamic profile
-    const newUser: User = {
-      id: `usr-${Date.now()}`,
-      name: email.split('@')[0],
-      email,
-      role: preferredRole || (email.includes('admin') ? 'admin' : 'creator'),
-      verified: true,
-      memberSince: 'October 2026',
-      credits: 200
-    };
-    setUser(newUser);
-    showToast(`Welcome to CineVault, ${newUser.name}!`, 'success');
-    return true;
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function AuthProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [user, setUser] = useState<AuthUser | null>(readSavedUser);
+
+  const saveSession = (session: AuthSession): AuthSession => {
+    localStorage.setItem('token', session.token);
+    localStorage.setItem('user', JSON.stringify(session.user));
+    localStorage.removeItem('cinevault_user');
+
+    setUser(session.user);
+
+    return session;
   };
 
-  const register = (name: string, email: string, role: 'creator' | 'vendor' = 'creator'): boolean => {
-    const newUser: User = {
-      id: `usr-${Date.now()}`,
-      name,
-      email,
-      role,
-      verified: true,
-      memberSince: 'October 2026',
-      credits: 100
-    };
-    setUser(newUser);
-    showToast(`Account created! Welcome aboard, ${name}.`, 'success');
-    return true;
+  const login = async (
+    email: string,
+    password: string
+  ): Promise<AuthSession> => {
+    const session = await loginUser(email.trim(), password);
+    return saveSession(session);
+  };
+
+  const register = async (
+    name: string,
+    email: string,
+    password: string
+  ): Promise<AuthSession> => {
+    const session = await registerUser(
+      name.trim(),
+      email.trim(),
+      password
+    );
+
+    return saveSession(session);
   };
 
   const logout = () => {
-    setUser(null);
-    showToast('Signed out successfully.', 'info');
-  };
+    [
+      'token',
+      'user',
+      'cart',
+      'cinevault_user',
+      'cinevault_cart',
+      'cinevault_rentals',
+      'cinevault_orders',
+      'cinevault_wishlist',
+    ].forEach((key) => {
+      localStorage.removeItem(key);
+    });
 
-  const switchDemoRole = (role: 'admin' | 'creator') => {
-    if (role === 'admin') {
-      setUser(MOCK_USERS[1]);
-      showToast('Switched to Admin account (Vault Administrator)', 'info');
-    } else {
-      setUser(MOCK_USERS[0]);
-      showToast('Switched to Creator account (Janaka Bandara)', 'info');
-    }
+    setUser(null);
   };
 
   return (
@@ -99,18 +125,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         logout,
-        switchDemoRole
       }}
     >
       {children}
     </AuthContext.Provider>
   );
-};
+}
 
-export const useAuth = () => {
+export function useAuth() {
   const context = useContext(AuthContext);
+
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useAuth must be used within AuthProvider');
   }
+
   return context;
-};
+}
