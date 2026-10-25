@@ -1,3 +1,25 @@
+# Dependencies
 node_modules/
+
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Build output
 dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Archives
+*.zip
+
+# Generated photo backups
+product-photo-backup-*.json
+
+# Operating system files
+.DS_Store
+Thumbs.db
