@@ -33,6 +33,7 @@ export function CartCheckoutPage() {
       for (const item of [...items]) {
         await createBooking({
           productId: item.productId,
+          requestId: item.id,
           type: item.type,
           ...(item.type === 'rent' ? { startDate: item.startDate, endDate: item.endDate } : {}),
         });
