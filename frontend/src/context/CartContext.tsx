@@ -1,8 +1,23 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Product, CartItem, OrderType } from '../types';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import type { Product, OrderType } from '../types';
+import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
+import { buildCartEntry, localToday, sameCartLine } from '../utils/cartUtils';
 
-interface AddToCartOptions {
+export interface CartEntry {
+  id: string;
+  productId: string;
+  name: string;
+  image: string;
+  type: OrderType;
+  startDate?: string;
+  endDate?: string;
+  rentalDays?: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+interface Options {
   startDate?: string;
   endDate?: string;
   rentalDays?: number;
@@ -10,196 +25,130 @@ interface AddToCartOptions {
 }
 
 interface CartContextType {
-  items: CartItem[];
-  addToCart: (product: Product, type: OrderType, options?: AddToCartOptions) => void;
-  removeFromCart: (cartItemId: string) => void;
-  updateQuantity: (cartItemId: string, quantity: number) => void;
-  updateRentalDates: (cartItemId: string, startDate: string, endDate: string, days: number) => void;
-  toggleDamageProtection: (cartItemId: string) => void;
-  clearCart: () => void;
-  subtotal: number;
-  damageProtectionFee: number;
-  securityDeposit: number;
-  estimatedTax: number;
-  shippingFee: number;
-  grandTotal: number;
+  items: CartEntry[];
   itemCount: number;
+  subtotal: number;
+  grandTotal: number;
+  addApiProduct: (product: any, type: OrderType, options?: Options) => boolean;
+  addToCart: (product: Product, type: OrderType, options?: Options) => void;
+  removeFromCart: (id: string) => void;
+  clearCart: () => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
+const keyFor = (owner: string) => `camera_cart_v1_${owner}`;
 
-export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+function readCart(owner: string): CartEntry[] {
+  if (owner === 'guest') return [];
+  try {
+    const raw = localStorage.getItem(keyFor(owner));
+    const saved = JSON.parse(raw || '[]');
+    if (!Array.isArray(saved)) return [];
+    return saved.filter((item) =>
+      typeof item.id === 'string' &&
+      /^[a-f\d]{24}$/i.test(item.productId || '') &&
+      ['rent', 'buy'].includes(item.type) &&
+      Number.isFinite(item.unitPrice) && item.unitPrice > 0 &&
+      Number.isFinite(item.totalPrice) && item.totalPrice > 0
+    );
+  } catch { return []; }
+}
+
+export function CartProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const { showToast } = useToast();
-
-  const [items, setItems] = useState<CartItem[]>(() => {
-    const saved = localStorage.getItem('cinevault_cart');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
+  const owner = user?.id || 'guest';
+  const [state, setState] = useState(() => ({ owner, items: readCart(owner) }));
 
   useEffect(() => {
-    localStorage.setItem('cinevault_cart', JSON.stringify(items));
-  }, [items]);
+    setState({ owner, items: readCart(owner) });
+  }, [owner]);
 
-  const addToCart = (product: Product, type: OrderType, options?: AddToCartOptions) => {
-    const today = new Date().toISOString().split('T')[0];
-    const threeDaysLater = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
+  useEffect(() => {
+    if (state.owner !== owner || owner === 'guest') return;
+    localStorage.setItem(keyFor(owner), JSON.stringify(state.items));
+  }, [state, owner]);
 
-    const startDate = options?.startDate || today;
-    const endDate = options?.endDate || threeDaysLater;
-    const rentalDays = options?.rentalDays || 3;
-    const includeDamageProtection = options?.includeDamageProtection ?? true;
-
-    // Check if duplicate already in cart
-    const existingIndex = items.findIndex(
-      (item) => item.product.id === product.id && item.type === type
-    );
-
-    if (existingIndex > -1 && type === 'buy') {
-      const updated = [...items];
-      updated[existingIndex].quantity += 1;
-      setItems(updated);
-      showToast(`Updated quantity for ${product.name}`, 'success');
-      return;
-    }
-
-    const newItem: CartItem = {
-      id: `cart-${Date.now()}-${Math.random()}`,
-      product,
-      type,
-      quantity: 1,
-      startDate: type === 'rent' ? startDate : undefined,
-      endDate: type === 'rent' ? endDate : undefined,
-      rentalDays: type === 'rent' ? rentalDays : undefined,
-      includeDamageProtection: type === 'rent' ? includeDamageProtection : undefined
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === keyFor(owner) || event.key === null) {
+        setState({ owner, items: readCart(owner) });
+      }
     };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [owner]);
 
-    setItems((prev) => [newItem, ...prev]);
-    showToast(
-      type === 'rent'
-        ? `Added ${product.name} to cart for ${rentalDays} days rental`
-        : `Added ${product.name} to cart for purchase`,
-      'success'
-    );
-  };
+  const items = state.owner === owner ? state.items : [];
 
-  const removeFromCart = (cartItemId: string) => {
-    const found = items.find((i) => i.id === cartItemId);
-    setItems((prev) => prev.filter((i) => i.id !== cartItemId));
-    if (found) {
-      showToast(`Removed ${found.product.name} from cart`, 'info');
+  const addApiProduct = (product: any, type: OrderType, options: Options = {}) => {
+    if (!user) {
+      showToast('Please sign in before adding equipment.', 'warning');
+      return false;
+    }
+    try {
+      const entry = buildCartEntry(product, type, options) as CartEntry;
+      if (items.some((item) => sameCartLine(item, entry))) {
+        showToast('This equipment and these dates are already in your cart.', 'info');
+        return false;
+      }
+      setState((previous) => {
+        const current = previous.owner === owner ? previous.items : [];
+        if (current.some((item) => sameCartLine(item, entry))) return previous;
+        return { owner, items: [...current, entry] };
+      });
+      showToast('Equipment added to your cart.', 'success');
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to add equipment.', 'error');
+      return false;
     }
   };
 
-  const updateQuantity = (cartItemId: string, quantity: number) => {
-    if (quantity <= 0) {
-      removeFromCart(cartItemId);
-      return;
-    }
-    setItems((prev) =>
-      prev.map((i) => (i.id === cartItemId ? { ...i, quantity } : i))
-    );
+  // Compatibility for the existing ProductCard and QuickView components.
+  const addToCart = (product: Product, type: OrderType, options: Options = {}) => {
+    const startDate = options.startDate || localToday();
+    const end = new Date(`${startDate}T00:00:00Z`);
+    end.setUTCDate(end.getUTCDate() + (options.rentalDays || 3));
+    addApiProduct({
+      _id: product.id,
+      name: product.name,
+      image: product.images?.[0],
+      available: product.status === 'Available',
+      type: product.availableForRent && product.availableForSale ? 'both' : product.availableForRent ? 'rent' : 'sell',
+      rentPrice: product.rentPricePerDay,
+      sellPrice: product.buyPrice,
+    }, type, {
+      ...options,
+      startDate,
+      endDate: options.endDate || end.toISOString().slice(0, 10),
+    });
   };
 
-  const updateRentalDates = (
-    cartItemId: string,
-    startDate: string,
-    endDate: string,
-    days: number
-  ) => {
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === cartItemId
-          ? {
-              ...i,
-              startDate,
-              endDate,
-              rentalDays: Math.max(1, days)
-            }
-          : i
-      )
-    );
-  };
-
-  const toggleDamageProtection = (cartItemId: string) => {
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === cartItemId
-          ? { ...i, includeDamageProtection: !i.includeDamageProtection }
-          : i
-      )
-    );
+  const removeFromCart = (id: string) => {
+    setState((previous) => previous.owner === owner
+      ? { owner, items: previous.items.filter((item) => item.id !== id) }
+      : previous);
   };
 
   const clearCart = () => {
-    setItems([]);
+    localStorage.removeItem(keyFor(owner));
+    setState({ owner, items: [] });
   };
-
-  // Calculations
-  const subtotal = items.reduce((acc, item) => {
-    if (item.type === 'rent') {
-      const days = item.rentalDays || 1;
-      return acc + item.product.rentPricePerDay * days * item.quantity;
-    } else {
-      return acc + item.product.buyPrice * item.quantity;
-    }
-  }, 0);
-
-  const damageProtectionFee = items.reduce((acc, item) => {
-    if (item.type === 'rent' && item.includeDamageProtection) {
-      const days = item.rentalDays || 1;
-      // 10% daily damage protection waiver
-      return acc + item.product.rentPricePerDay * 0.1 * days * item.quantity;
-    }
-    return acc;
-  }, 0);
-
-  const securityDeposit = items.reduce((acc, item) => {
-    if (item.type === 'rent') {
-      return acc + (item.product.depositRequired || 0) * item.quantity;
-    }
-    return acc;
-  }, 0);
-
-  const shippingFee = items.length > 0 ? (subtotal > 1000 ? 0 : 45) : 0;
-  const estimatedTax = subtotal * 0.0825; // 8.25% standard sales tax
-  const grandTotal = subtotal + damageProtectionFee + estimatedTax + shippingFee;
-  const itemCount = items.reduce((acc, item) => acc + item.quantity, 0);
+  const subtotal = Math.round(items.reduce((sum, item) => sum + item.totalPrice, 0) * 100) / 100;
 
   return (
-    <CartContext.Provider
-      value={{
-        items,
-        addToCart,
-        removeFromCart,
-        updateQuantity,
-        updateRentalDates,
-        toggleDamageProtection,
-        clearCart,
-        subtotal,
-        damageProtectionFee,
-        securityDeposit,
-        estimatedTax,
-        shippingFee,
-        grandTotal,
-        itemCount
-      }}
-    >
+    <CartContext.Provider value={{
+      items, itemCount: items.length, subtotal, grandTotal: subtotal,
+      addApiProduct, addToCart, removeFromCart, clearCart,
+    }}>
       {children}
     </CartContext.Provider>
   );
-};
+}
 
-export const useCart = () => {
+export function useCart() {
   const context = useContext(CartContext);
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider');
-  }
+  if (!context) throw new Error('useCart must be used within CartProvider');
   return context;
-};
+}

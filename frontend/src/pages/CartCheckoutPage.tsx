@@ -1,137 +1,101 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { createBooking } from '../services/bookingService';
+import { rentalDays } from '../utils/cartUtils';
+
+const money = (value: number) => value.toLocaleString('en-US', {
+  style: 'currency', currency: 'USD',
+});
 
 export function CartCheckoutPage() {
-  const [cart, setCart] = useState<any[]>(
-    JSON.parse(localStorage.getItem('cart') || '[]')
-  );
-  const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const { items, subtotal, removeFromCart, clearCart } = useCart();
+  const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
-
-  const removeFromCart = (index: number) => {
-    const updated = cart.filter((_, i) => i !== index);
-    setCart(updated);
-    localStorage.setItem('cart', JSON.stringify(updated));
-  };
-
-  const getTotal = () => cart.reduce((sum, item) => sum + item.totalPrice, 0);
+  const submitting = useRef(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
 
   const handleCheckout = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
+    if (submitting.current || !items.length) return;
+    if (!isAuthenticated) { navigate('/login'); return; }
+    submitting.current = true;
     setLoading(true);
+    setError('');
+    let completed = 0;
     try {
-      for (const item of cart) {
+      // Check every line before sending any booking request.
+      for (const item of items) {
+        if (item.type === 'rent') rentalDays(item.startDate, item.endDate);
+      }
+      for (const item of [...items]) {
         await createBooking({
           productId: item.productId,
           type: item.type,
-          startDate: item.startDate,
-          endDate: item.endDate,
+          ...(item.type === 'rent' ? { startDate: item.startDate, endDate: item.endDate } : {}),
         });
+        completed += 1;
+        // Successful items are removed immediately, including on a later failure.
+        removeFromCart(item.id);
       }
-      localStorage.removeItem('cart');
-      setCart([]);
       setSuccess(true);
-      setTimeout(() => navigate('/dashboard'), 2000);
-    } catch (err) {
-      alert('Checkout failed. Please login first.');
-      navigate('/login');
+    } catch (err: any) {
+      const reason = err.response?.data?.message || err.message || 'Unable to submit booking.';
+      setError(`${completed ? `${completed} booking(s) submitted. Remaining items are still in your cart. ` : ''}${reason}`);
     } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };
 
   if (success) return (
-    <div className="min-h-screen bg-[#111827] flex items-center justify-center">
-      <div className="text-center">
-        <div className="text-6xl mb-4">🎉</div>
-        <h2 className="text-3xl font-bold text-white mb-2">Order Confirmed!</h2>
-        <p className="text-gray-400">Redirecting to dashboard...</p>
-      </div>
+    <div className="max-w-2xl mx-auto px-4 py-20 text-center">
+      <h1 className="text-3xl font-bold mb-4">Booking Request Submitted</h1>
+      <p className="text-gray-400 mb-7">Your bookings are pending confirmation. View their status in your dashboard.</p>
+      <Link to="/dashboard" className="bg-amber-500 text-black font-bold px-6 py-3 rounded-lg">View My Bookings</Link>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[#111827] py-12 px-4">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold text-white mb-8">Your Cart</h1>
-
-        {cart.length === 0 ? (
-          <div className="text-center py-20">
-            <div className="text-6xl mb-4">🛒</div>
-            <h2 className="text-2xl font-bold text-white mb-2">Cart is Empty</h2>
-            <p className="text-gray-400 mb-6">Add some equipment to get started</p>
-            <button
-              onClick={() => navigate('/products')}
-              className="bg-amber-500 hover:bg-amber-600 text-black font-bold px-8 py-3 rounded-lg"
-            >
-              Browse Equipment
-            </button>
+    <div className="max-w-6xl mx-auto px-4 py-12">
+      <h1 className="text-3xl font-bold mb-7">Your Cart</h1>
+      {error && <div role="alert" className="border border-red-500 rounded-lg bg-red-500/10 text-red-300 p-4 mb-6">{error}</div>}
+      {!items.length ? (
+        <div className="text-center border border-gray-700 rounded-xl p-12 bg-[#1F2937]">
+          <h2 className="text-xl font-semibold mb-3">Your cart is empty</h2>
+          <p className="text-gray-400 mb-6">Choose equipment from the catalog to get started.</p>
+          <Link to="/products" className="text-amber-400 font-semibold">Browse Equipment →</Link>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
+          <div className="lg:col-span-2 space-y-4">
+            {items.map((item) => (
+              <article key={item.id} className="flex gap-4 p-4 border border-gray-700 rounded-xl bg-[#1F2937]">
+                <div className="w-20 h-20 bg-white rounded-lg shrink-0 overflow-hidden">
+                  {item.image && <img src={item.image} alt={item.name} className="w-full h-full object-contain" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <Link to={`/product/${item.productId}`} className="font-semibold hover:text-amber-400">{item.name}</Link>
+                  <p className="text-sm text-amber-400 mt-1">{item.type === 'rent' ? 'Rental' : 'Purchase'}</p>
+                  {item.type === 'rent' && <p className="text-xs text-gray-400 mt-2">{item.startDate} → {item.endDate} · {item.rentalDays} days</p>}
+                  <p className="font-bold mt-2">{money(item.totalPrice)}</p>
+                  <button type="button" disabled={loading} onClick={() => removeFromCart(item.id)} className="text-sm text-red-300 mt-2 disabled:opacity-50">Remove</button>
+                </div>
+              </article>
+            ))}
+            <button type="button" disabled={loading} onClick={() => { if (window.confirm('Remove all items from your cart?')) clearCart(); }} className="text-sm text-gray-400 hover:text-white disabled:opacity-50">Clear Cart</button>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Cart Items */}
-            <div className="lg:col-span-2 space-y-4">
-              {cart.map((item, index) => (
-                <div key={index} className="bg-[#1F2937] rounded-xl p-4 border border-gray-700 flex gap-4">
-                  <img
-                    src={item.image || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=100'}
-                    alt={item.name}
-                    className="w-20 h-20 object-cover rounded-lg"
-                  />
-                  <div className="flex-1">
-                    <h3 className="text-white font-semibold">{item.name}</h3>
-                    <p className="text-amber-400 text-sm capitalize">{item.type}</p>
-                    {item.type === 'rent' && (
-                      <p className="text-gray-400 text-xs mt-1">
-                        {item.startDate} → {item.endDate}
-                      </p>
-                    )}
-                    <p className="text-white font-bold mt-1">${item.totalPrice}</p>
-                  </div>
-                  <button
-                    onClick={() => removeFromCart(index)}
-                    className="text-red-400 hover:text-red-300 text-sm"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {/* Order Summary */}
-            <div className="bg-[#1F2937] rounded-xl p-6 border border-gray-700 h-fit">
-              <h2 className="text-white font-bold text-xl mb-4">Order Summary</h2>
-              <div className="space-y-3 mb-6">
-                <div className="flex justify-between text-gray-400">
-                  <span>Items ({cart.length})</span>
-                  <span>${getTotal()}</span>
-                </div>
-                <div className="flex justify-between text-gray-400">
-                  <span>Service Fee</span>
-                  <span>$0</span>
-                </div>
-                <div className="border-t border-gray-600 pt-3 flex justify-between text-white font-bold text-lg">
-                  <span>Total</span>
-                  <span>${getTotal()}</span>
-                </div>
-              </div>
-              <button
-                onClick={handleCheckout}
-                disabled={loading}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold py-3 rounded-lg transition-colors"
-              >
-                {loading ? 'Processing...' : 'Confirm Order'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+          <aside className="bg-[#1F2937] border border-gray-700 rounded-xl p-6 h-fit">
+            <h2 className="text-xl font-bold mb-5">Booking Summary</h2>
+            <div className="flex justify-between text-gray-300 mb-4"><span>Items</span><span>{items.length}</span></div>
+            <div className="flex justify-between border-t border-gray-700 pt-4 mb-5 font-bold"><span>Estimated total</span><span>{money(subtotal)}</span></div>
+            <p className="text-xs text-gray-400 mb-5">The server calculates the final booking price. Submitting this request does not collect payment.</p>
+            <button type="button" disabled={loading} onClick={() => void handleCheckout()} className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-bold py-3 rounded-lg">{loading ? 'Submitting...' : 'Submit Booking Request'}</button>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

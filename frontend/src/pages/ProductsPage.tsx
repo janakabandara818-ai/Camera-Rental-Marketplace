@@ -1,3 +1,4 @@
+import { useCart } from '../context/CartContext';
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { getProducts } from '../services/productService';
@@ -13,6 +14,7 @@ export function ProductsPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const navigate = useNavigate();
+  const { addApiProduct } = useCart();
 
   useEffect(() => { fetchProducts(); }, []);
 
@@ -27,22 +29,16 @@ export function ProductsPage() {
     }
   };
 
-  const addToCart = (product: any, type: string, e: React.MouseEvent) => {
+  const addToCart = (product: any, type: 'rent' | 'buy', e: React.MouseEvent) => {
     e.preventDefault();
-    const token = localStorage.getItem('token');
-    if (!token) { navigate('/login'); return; }
-    const cart = JSON.parse(localStorage.getItem('cart') || '[]');
-    let totalPrice = 0;
-    if (type === 'rent' && startDate && endDate) {
-      const days = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24));
-      totalPrice = days * product.rentPrice;
-    } else if (type === 'buy') {
-      totalPrice = product.sellPrice;
+    if (!localStorage.getItem('token')) { navigate('/login'); return; }
+    const added = addApiProduct(product, type, { startDate, endDate });
+    if (added) {
+      setRentModal(null);
+      setStartDate('');
+      setEndDate('');
+      navigate('/cart');
     }
-    cart.push({ productId: product._id, name: product.name, image: product.image, type, startDate, endDate, totalPrice });
-    localStorage.setItem('cart', JSON.stringify(cart));
-    setRentModal(null);
-    navigate('/cart');
   };
 
   const filtered = products
@@ -120,7 +116,7 @@ export function ProductsPage() {
               className="bg-[#1F2937] rounded-xl overflow-hidden border border-gray-700 hover:border-amber-500 transition-all group block">
               <div className="relative overflow-hidden h-48">
                 <img src={product.image || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=500'}
-                  alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                  alt={product.name} className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300" />
                 <div className="absolute top-3 right-3">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${product.available ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                     {product.available ? 'Available' : 'Unavailable'}
@@ -138,13 +134,13 @@ export function ProductsPage() {
                   {product.sellPrice && <span className="text-gray-400 text-sm">| Buy: ${product.sellPrice}</span>}
                 </div>
                 <div className="flex gap-2">
-                  {product.rentPrice && (
+                  {(product.type === 'rent' || product.type === 'both') && product.rentPrice && (
                     <button onClick={(e) => { e.preventDefault(); setRentModal(product); }}
                       className="flex-1 bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold py-2 rounded-lg transition-colors">
                       Rent Now
                     </button>
                   )}
-                  {product.sellPrice && (
+                  {(product.type === 'sell' || product.type === 'both') && product.sellPrice && (
                     <button onClick={(e) => addToCart(product, 'buy', e)}
                       className="flex-1 bg-[#111827] hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg border border-gray-600 transition-colors">
                       Buy Now

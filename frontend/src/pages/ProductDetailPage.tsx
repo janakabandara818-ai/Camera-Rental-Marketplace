@@ -1,3 +1,4 @@
+import { useCart } from '../context/CartContext';
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getProduct } from '../services/productService';
@@ -6,6 +7,7 @@ import { getReviews, addReview } from '../services/reviewService';
 export function ProductDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { addApiProduct } = useCart();
   const [product, setProduct] = useState<any>(null);
   const [reviews, setReviews] = useState([]);
   const [avgRating, setAvgRating] = useState(0);
@@ -34,20 +36,9 @@ export function ProductDetailPage() {
     }
   };
 
-  const addToCart = (type: string) => {
-    const token = localStorage.getItem('token');
-    if (!token) { navigate('/login'); return; }
-    const cart = JSON.parse(localStorage.getItem('cart') || '[]');
-    let totalPrice = 0;
-    if (type === 'rent' && startDate && endDate) {
-      const days = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24));
-      totalPrice = days * product.rentPrice;
-    } else {
-      totalPrice = product.sellPrice;
-    }
-    cart.push({ productId: product._id, name: product.name, image: product.image, type, startDate, endDate, totalPrice });
-    localStorage.setItem('cart', JSON.stringify(cart));
-    navigate('/cart');
+  const addToCart = (type: 'rent' | 'buy') => {
+    if (!localStorage.getItem('token')) { navigate('/login'); return; }
+    if (addApiProduct(product, type, { startDate, endDate })) navigate('/cart');
   };
 
   const handleReviewSubmit = async (e: React.FormEvent) => {
@@ -102,7 +93,7 @@ export function ProductDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 mb-12">
           <div className="rounded-2xl overflow-hidden h-96">
             <img src={product.image || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800'}
-              alt={product.name} className="w-full h-full object-cover" />
+              alt={product.name} className="w-full h-full object-contain" />
           </div>
 
           <div>
@@ -118,10 +109,10 @@ export function ProductDetailPage() {
             <p className="text-gray-400 mb-6">{product.description}</p>
 
             <div className="bg-[#1F2937] rounded-xl p-4 mb-6 border border-gray-700">
-              {product.rentPrice && (
+              {(product.type === 'rent' || product.type === 'both') && product.rentPrice && (
                 <p className="text-amber-400 text-2xl font-bold">${product.rentPrice}<span className="text-gray-400 text-sm font-normal">/day</span></p>
               )}
-              {product.sellPrice && (
+              {(product.type === 'sell' || product.type === 'both') && product.sellPrice && (
                 <p className="text-white text-lg mt-1">Buy: <span className="text-green-400 font-bold">${product.sellPrice}</span></p>
               )}
             </div>
@@ -133,7 +124,7 @@ export function ProductDetailPage() {
               {product.available ? 'Available' : 'Not Available'}
             </div>
 
-            {product.rentPrice && (
+            {(product.type === 'rent' || product.type === 'both') && product.rentPrice && (
               <div className="space-y-3 mb-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -161,7 +152,7 @@ export function ProductDetailPage() {
               </div>
             )}
 
-            {product.sellPrice && (
+            {(product.type === 'sell' || product.type === 'both') && product.sellPrice && (
               <button onClick={() => addToCart('buy')}
                 className="w-full bg-[#1F2937] hover:bg-gray-700 text-white font-bold py-3 rounded-xl border border-gray-600">
                 🛒 Buy Now
