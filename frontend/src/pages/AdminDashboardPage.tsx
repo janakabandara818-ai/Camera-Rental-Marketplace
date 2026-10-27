@@ -1,10 +1,14 @@
+import { AdminBookingsPanel } from '../components/admin/AdminBookingsPanel';
+import { useAuth } from '../context/AuthContext';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getProducts, createProduct, updateProduct, deleteProduct } from '../services/productService';
 import { uploadImage } from '../services/uploadService';
 
 export function AdminDashboardPage() {
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'inventory' | 'bookings'>('inventory');
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState<any>(null);
@@ -18,8 +22,7 @@ export function AdminDashboardPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    if (user.role !== 'admin') { navigate('/'); return; }
+    if (user?.role !== 'admin') { navigate('/'); return; }
     fetchProducts();
   }, []);
 
@@ -75,6 +78,7 @@ export function AdminDashboardPage() {
   };
 
   const handleEdit = (product: any) => {
+    setImageFile(null);
     setEditProduct(product);
     setImagePreview(product.image || '');
     setForm({
@@ -100,6 +104,23 @@ export function AdminDashboardPage() {
     }
   };
 
+  const tabs = (
+    <div className="flex gap-3 mb-8" aria-label="Admin sections">
+      <button type="button" onClick={() => setActiveTab('inventory')} className={`px-5 py-3 rounded-lg text-sm font-semibold ${activeTab === 'inventory' ? 'bg-amber-500 text-black' : 'bg-[#1F2937] text-gray-300'}`}>Inventory</button>
+      <button type="button" onClick={() => setActiveTab('bookings')} className={`px-5 py-3 rounded-lg text-sm font-semibold ${activeTab === 'bookings' ? 'bg-amber-500 text-black' : 'bg-[#1F2937] text-gray-300'}`}>Bookings</button>
+    </div>
+  );
+
+  if (activeTab === 'bookings') return (
+    <div className="min-h-screen bg-[#111827] py-12 px-4">
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-3xl font-bold mb-6">Admin Dashboard</h1>
+        {tabs}
+        <AdminBookingsPanel onInventoryChange={() => { void fetchProducts(); }} />
+      </div>
+    </div>
+  );
+
   if (loading) return (
     <div className="min-h-screen bg-[#111827] flex items-center justify-center">
       <div className="text-amber-500 text-xl">Loading...</div>
@@ -110,6 +131,8 @@ export function AdminDashboardPage() {
     <div className="min-h-screen bg-[#111827] py-12 px-4">
       <div className="max-w-7xl mx-auto">
 
+        {tabs}
+
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div>
@@ -117,7 +140,7 @@ export function AdminDashboardPage() {
             <p className="text-gray-400 mt-1">Manage your camera equipment</p>
           </div>
           <button
-            onClick={() => { setEditProduct(null); setImageFile(null); setImagePreview(''); setShowModal(true); }}
+            onClick={() => { setEditProduct(null); setImageFile(null); setImagePreview(''); setForm({ name: '', description: '', category: 'camera', type: 'both', rentPrice: '', sellPrice: '', image: '', available: true }); setShowModal(true); }}
             className="bg-amber-500 hover:bg-amber-600 text-black font-bold px-6 py-3 rounded-lg"
           >
             + Add Product
@@ -167,7 +190,7 @@ export function AdminDashboardPage() {
                         <img
                           src={product.image || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=50'}
                           alt={product.name}
-                          className="w-12 h-12 rounded-lg object-cover"
+                          className="w-12 h-12 rounded-lg object-contain"
                         />
                         <span className="text-white text-sm font-medium line-clamp-1">{product.name}</span>
                       </div>
@@ -217,8 +240,8 @@ export function AdminDashboardPage() {
                 <div className="border-2 border-dashed border-gray-600 rounded-xl p-4 text-center hover:border-amber-500 transition-colors">
                   {imagePreview ? (
                     <div className="relative">
-                      <img src={imagePreview} alt="Preview" className="w-full h-40 object-cover rounded-lg mb-2" />
-                      <button type="button" onClick={() => { setImagePreview(''); setImageFile(null); }} className="text-red-400 text-xs">Remove Image</button>
+                      <img src={imagePreview} alt="Preview" className="w-full h-40 object-contain rounded-lg mb-2" />
+                      <button type="button" onClick={() => { setImagePreview(''); setImageFile(null); setForm(previous => ({ ...previous, image: '' })); }} className="text-red-400 text-xs">Remove Image</button>
                     </div>
                   ) : (
                     <label className="cursor-pointer">
