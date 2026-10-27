@@ -15,6 +15,7 @@ export function AdminDashboardPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '', description: '', category: 'camera',
     type: 'both', rentPrice: '', sellPrice: '', image: '', available: true
@@ -47,6 +48,8 @@ export function AdminDashboardPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
+    setSaving(true);
     try {
       let imageUrl = form.image;
 
@@ -71,9 +74,11 @@ export function AdminDashboardPage() {
       setImagePreview('');
       setForm({ name: '', description: '', category: 'camera', type: 'both', rentPrice: '', sellPrice: '', image: '', available: true });
       fetchProducts();
-    } catch (err) {
-      alert('Failed to save product');
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to save product');
+    } finally {
       setUploading(false);
+      setSaving(false);
     }
   };
 
@@ -99,8 +104,8 @@ export function AdminDashboardPage() {
     try {
       await deleteProduct(id);
       fetchProducts();
-    } catch (err) {
-      alert('Failed to delete');
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to delete');
     }
   };
 
@@ -290,12 +295,12 @@ export function AdminDashboardPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-gray-300 text-sm mb-1">Rent Price/day ($)</label>
-                  <input type="number" value={form.rentPrice} onChange={(e) => setForm({...form, rentPrice: e.target.value})}
+                  <input type="number" min="0.01" step="0.01" value={form.rentPrice} onChange={(e) => setForm({...form, rentPrice: e.target.value})}
                     className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500" />
                 </div>
                 <div>
                   <label className="block text-gray-300 text-sm mb-1">Sell Price ($)</label>
-                  <input type="number" value={form.sellPrice} onChange={(e) => setForm({...form, sellPrice: e.target.value})}
+                  <input type="number" min="0.01" step="0.01" value={form.sellPrice} onChange={(e) => setForm({...form, sellPrice: e.target.value})}
                     className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500" />
                 </div>
               </div>
@@ -308,9 +313,9 @@ export function AdminDashboardPage() {
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => { setShowModal(false); setEditProduct(null); }}
                   className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded-lg">Cancel</button>
-                <button type="submit" disabled={uploading}
+                <button type="submit" disabled={saving}
                   className="flex-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-bold py-2 rounded-lg">
-                  {uploading ? 'Uploading...' : editProduct ? 'Update' : 'Add Product'}
+                  {uploading ? 'Uploading...' : saving ? 'Saving...' : editProduct ? 'Update' : 'Add Product'}
                 </button>
               </div>
             </form>

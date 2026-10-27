@@ -8,15 +8,19 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'camera-rental',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-    transformation: [{ width: 800, height: 600, crop: 'limit' }],
+const storage = new CloudinaryStorage({ cloudinary, params: {
+  folder: 'camera-rental', allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+  transformation: [{ width: 800, height: 600, crop: 'limit' }],
+} });
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 5 },
+  fileFilter(req, file, callback) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      const error = new Error('Upload a JPG, PNG or WebP image.'); error.status = 415;
+      return callback(error);
+    }
+    callback(null, true);
   },
 });
-
-const upload = multer({ storage });
-
 module.exports = { cloudinary, upload };

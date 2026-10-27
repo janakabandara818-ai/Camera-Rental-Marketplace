@@ -1,15 +1,19 @@
+import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getProduct } from '../services/productService';
-import { getReviews, addReview } from '../services/reviewService';
+import { getReviews, addReview, deleteReview } from '../services/reviewService';
 
 export function ProductDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { addApiProduct } = useCart();
+  const { user, isAdmin } = useAuth();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [product, setProduct] = useState<any>(null);
-  const [reviews, setReviews] = useState([]);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [avgRating, setAvgRating] = useState(0);
   const [loading, setLoading] = useState(true);
   const [rating, setRating] = useState(5);
@@ -18,9 +22,10 @@ export function ProductDetailPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  useEffect(() => { fetchData(); }, [id]);
+  useEffect(() => { setLoading(true); setProduct(null); setStartDate(''); setEndDate(''); void fetchData(); }, [id]);
 
   const fetchData = async () => {
+    setLoadError('');
     try {
       const [productData, reviewData] = await Promise.all([
         getProduct(id!),
@@ -29,8 +34,8 @@ export function ProductDetailPage() {
       setProduct(productData);
       setReviews(reviewData.reviews);
       setAvgRating(reviewData.avgRating);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setLoadError(err.response?.status === 404 ? 'Product not found.' : 'Unable to load equipment. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -45,17 +50,29 @@ export function ProductDetailPage() {
     e.preventDefault();
     const token = localStorage.getItem('token');
     if (!token) { navigate('/login'); return; }
+    if (submitting) return;
     setSubmitting(true);
     try {
       await addReview(id!, rating, comment);
       setComment('');
       setRating(5);
-      fetchData();
+      await fetchData();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to submit review');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleDeleteReview = async (reviewId: string) => {
+    if (deletingId || !window.confirm('Delete this review?')) return;
+    setDeletingId(reviewId);
+    try {
+      await deleteReview(reviewId);
+      await fetchData();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Unable to delete review.');
+    } finally { setDeletingId(null); }
   };
 
   const StarRating = ({ value, onChange }: { value: number, onChange?: (v: number) => void }) => (
@@ -75,9 +92,9 @@ export function ProductDetailPage() {
     </div>
   );
 
-  if (!product) return (
+  if (loadError || !product) return (
     <div className="min-h-screen bg-[#111827] flex items-center justify-center">
-      <div className="text-red-400 text-xl">Product not found</div>
+      <div className="text-center"><p className="text-red-400 text-xl mb-4">{loadError || 'Product not found.'}</p><button onClick={() => { setLoading(true); void fetchData(); }} className="text-amber-400">Try Again</button></div>
     </div>
   );
 
@@ -172,7 +189,7 @@ export function ProductDetailPage() {
               </div>
               <div>
                 <label className="block text-gray-300 text-sm mb-1">Comment</label>
-                <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={4}
+                <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={4} maxLength={2000}
                   placeholder="Share your experience..."
                   className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:border-amber-500"
                   required />
@@ -197,14 +214,19 @@ export function ProductDetailPage() {
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center text-black font-bold text-sm">
-                          {review.user.name.charAt(0).toUpperCase()}
+                          {review.user?.name?.charAt(0).toUpperCase() || '?'}
                         </div>
-                        <span className="text-white font-medium text-sm">{review.user.name}</span>
+                        <span className="text-white font-medium text-sm">{review.user?.name || 'Deleted account'}</span>
                       </div>
                       <StarRating value={review.rating} />
                     </div>
                     <p className="text-gray-400 text-sm">{review.comment}</p>
                     <p className="text-gray-600 text-xs mt-2">{new Date(review.createdAt).toLocaleDateString()}</p>
+                    {(isAdmin || (user && review.user?._id === user.id)) && (
+                      <button type="button" disabled={!!deletingId} onClick={() => void handleDeleteReview(review._id)} className="text-red-300 text-xs mt-3 disabled:opacity-50">
+                        {deletingId === review._id ? 'Deleting...' : 'Delete Review'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
