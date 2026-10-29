@@ -1,66 +1,335 @@
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { Link } from 'react-router-dom';
+
 import { AdminBookingsPanel } from '../components/admin/AdminBookingsPanel';
+import { Modal } from '../components/common/Modal';
 import { useAuth } from '../context/AuthContext';
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getProducts, createProduct, updateProduct, deleteProduct } from '../services/productService';
+import {
+  getProducts,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+} from '../services/productService';
 import { uploadImage } from '../services/uploadService';
 
+type Category = 'camera' | 'lens' | 'lighting' | 'accessory';
+type ProductType = 'rent' | 'sell' | 'both';
+
+interface Product {
+  _id: string;
+  name: string;
+  description: string;
+  category: Category;
+  type: ProductType;
+  rentPrice?: number;
+  sellPrice?: number;
+  image?: string;
+  available: boolean;
+}
+
+interface ProductForm {
+  name: string;
+  description: string;
+  category: Category;
+  type: ProductType;
+  rentPrice: string;
+  sellPrice: string;
+  image: string;
+  available: boolean;
+}
+
+const emptyForm: ProductForm = {
+  name: '',
+  description: '',
+  category: 'camera',
+  type: 'both',
+  rentPrice: '',
+  sellPrice: '',
+  image: '',
+  available: true,
+};
+
+const inputClass =
+  'w-full min-w-0 rounded-lg border border-gray-600 bg-[#111827] px-3 py-2.5 text-white focus:outline-none focus:border-amber-500 disabled:opacity-50';
+
+function messageFrom(error: unknown, fallback: string) {
+  const response = error as {
+    response?: {
+      data?: {
+        message?: unknown;
+      };
+    };
+  };
+
+  const message = response.response?.data?.message;
+
+  return typeof message === 'string' ? message : fallback;
+}
+
+function money(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '—';
+  }
+
+  return value.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  });
+}
+
+function validPrice(value: string) {
+  return (
+    /^\d+(?:\.\d{1,2})?$/.test(value.trim()) &&
+    Number(value) > 0 &&
+    Number.isSafeInteger(Math.round(Number(value) * 100))
+  );
+}
+
+function InventoryImage({
+  src,
+  name,
+}: {
+  src?: string;
+  name: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  return (
+    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white">
+      {src && !failed ? (
+        <img
+          src={src}
+          alt={name}
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="h-full w-full object-contain p-1"
+        />
+      ) : (
+        <span className="text-[10px] text-gray-500">No image</span>
+      )}
+    </div>
+  );
+}
+
 export function AdminDashboardPage() {
-  const [products, setProducts] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'inventory' | 'bookings'>('inventory');
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
+  const [activeTab, setActiveTab] =
+    useState<'inventory' | 'bookings'>('inventory');
+
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [notice, setNotice] = useState('');
+
   const [showModal, setShowModal] = useState(false);
-  const [editProduct, setEditProduct] = useState<any>(null);
+  const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [form, setForm] = useState<ProductForm>({ ...emptyForm });
+  const [formError, setFormError] = useState('');
+
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState('');
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    name: '', description: '', category: 'camera',
-    type: 'both', rentPrice: '', sellPrice: '', image: '', available: true
-  });
-  const navigate = useNavigate();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (user?.role !== 'admin') { navigate('/'); return; }
-    fetchProducts();
-  }, []);
+  const requestNumber = useRef(0);
+  const saveBusy = useRef(false);
+  const deleteBusy = useRef(false);
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
+    if (!isAdmin) return;
+
+    const currentRequest = ++requestNumber.current;
+
+    setLoading(true);
+    setLoadError('');
+
     try {
       const data = await getProducts();
-      setProducts(data);
-    } catch (err) {
-      console.error(err);
+
+      if (!Array.isArray(data)) {
+        throw new Error('Invalid products response');
+      }
+
+      if (currentRequest === requestNumber.current) {
+        setProducts(data);
+      }
+    } catch (error: unknown) {
+      if (currentRequest === requestNumber.current) {
+        setLoadError(
+          messageFrom(error, 'Unable to load inventory. Please try again.')
+        );
+      }
     } finally {
-      setLoading(false);
+      if (currentRequest === requestNumber.current) {
+        setLoading(false);
+      }
     }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      void fetchProducts();
+    }
+
+    return () => {
+      requestNumber.current += 1;
+    };
+  }, [fetchProducts, isAdmin]);
+
+  useEffect(() => {
+    if (!imageFile) {
+      setImagePreview(form.image);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(imageFile);
+    setImagePreview(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [imageFile, form.image]);
+
+  const closeModal = () => {
+    if (saveBusy.current) return;
+
+    setShowModal(false);
+    setEditProduct(null);
+    setImageFile(null);
+    setFormError('');
+    setForm({ ...emptyForm });
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setImageFile(file);
-      setImagePreview(URL.createObjectURL(file));
-    }
+  const openCreate = () => {
+    setEditProduct(null);
+    setForm({ ...emptyForm });
+    setImageFile(null);
+    setFormError('');
+    setShowModal(true);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (saving) return;
+  const openEdit = (product: Product) => {
+    setEditProduct(product);
+    setImageFile(null);
+    setFormError('');
+
+    setForm({
+      name: product.name,
+      description: product.description,
+      category: product.category,
+      type: product.type,
+      rentPrice:
+        product.rentPrice === undefined
+          ? ''
+          : String(product.rentPrice),
+      sellPrice:
+        product.sellPrice === undefined
+          ? ''
+          : String(product.sellPrice),
+      image: product.image || '',
+      available: product.available,
+    });
+
+    setShowModal(true);
+  };
+
+  const handleImageChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setFormError('Choose a JPG, PNG or WebP image.');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setFormError('Image must be 5 MB or smaller.');
+      return;
+    }
+
+    setFormError('');
+    setImageFile(file);
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!isAdmin || saveBusy.current) return;
+
+    setFormError('');
+
+    const name = form.name.trim();
+    const description = form.description.trim();
+
+    if (!name || !description) {
+      setFormError('Enter a product name and description.');
+      return;
+    }
+
+    if (form.type !== 'sell' && !validPrice(form.rentPrice)) {
+      setFormError(
+        'Enter a positive daily rental price with at most 2 decimal places.'
+      );
+      return;
+    }
+
+    if (form.type !== 'rent' && !validPrice(form.sellPrice)) {
+      setFormError(
+        'Enter a positive purchase price with at most 2 decimal places.'
+      );
+      return;
+    }
+
+    saveBusy.current = true;
     setSaving(true);
+
     try {
       let imageUrl = form.image;
 
       if (imageFile) {
         setUploading(true);
+
         const uploaded = await uploadImage(imageFile);
+
+        if (!uploaded || typeof uploaded.url !== 'string') {
+          throw new Error('Invalid image upload response');
+        }
+
         imageUrl = uploaded.url;
         setUploading(false);
       }
 
-      const productData = { ...form, image: imageUrl };
+      const productData = {
+        name,
+        description,
+        category: form.category,
+        type: form.type,
+        available: form.available,
+        image: imageUrl,
+        ...(form.type !== 'sell'
+          ? { rentPrice: Number(form.rentPrice) }
+          : {}),
+        ...(form.type !== 'rent'
+          ? { sellPrice: Number(form.sellPrice) }
+          : {}),
+      };
 
       if (editProduct) {
         await updateProduct(editProduct._id, productData);
@@ -68,260 +337,588 @@ export function AdminDashboardPage() {
         await createProduct(productData);
       }
 
+      setNotice(
+        editProduct
+          ? 'Equipment updated successfully.'
+          : 'Equipment added successfully.'
+      );
+      setActionError('');
       setShowModal(false);
       setEditProduct(null);
       setImageFile(null);
-      setImagePreview('');
-      setForm({ name: '', description: '', category: 'camera', type: 'both', rentPrice: '', sellPrice: '', image: '', available: true });
-      fetchProducts();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to save product');
+      setForm({ ...emptyForm });
+
+      await fetchProducts();
+    } catch (error: unknown) {
+      setFormError(
+        messageFrom(
+          error,
+          'Unable to save equipment. Check your connection and try again.'
+        )
+      );
     } finally {
-      setUploading(false);
+      saveBusy.current = false;
       setSaving(false);
+      setUploading(false);
     }
   };
 
-  const handleEdit = (product: any) => {
-    setImageFile(null);
-    setEditProduct(product);
-    setImagePreview(product.image || '');
-    setForm({
-      name: product.name,
-      description: product.description,
-      category: product.category,
-      type: product.type,
-      rentPrice: product.rentPrice || '',
-      sellPrice: product.sellPrice || '',
-      image: product.image || '',
-      available: product.available
-    });
-    setShowModal(true);
-  };
+  const handleDelete = async (product: Product) => {
+    if (
+      !isAdmin ||
+      deleteBusy.current ||
+      !window.confirm(`Delete "${product.name}" permanently?`)
+    ) {
+      return;
+    }
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this product?')) return;
+    deleteBusy.current = true;
+    setDeletingId(product._id);
+    setActionError('');
+    setNotice('');
+
     try {
-      await deleteProduct(id);
-      fetchProducts();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to delete');
+      await deleteProduct(product._id);
+      setNotice('Equipment deleted successfully.');
+      await fetchProducts();
+    } catch (error: unknown) {
+      setActionError(
+        messageFrom(error, 'Unable to delete equipment. Please try again.')
+      );
+    } finally {
+      deleteBusy.current = false;
+      setDeletingId(null);
     }
   };
 
-  const tabs = (
-    <div className="flex gap-3 mb-8" aria-label="Admin sections">
-      <button type="button" onClick={() => setActiveTab('inventory')} className={`px-5 py-3 rounded-lg text-sm font-semibold ${activeTab === 'inventory' ? 'bg-amber-500 text-black' : 'bg-[#1F2937] text-gray-300'}`}>Inventory</button>
-      <button type="button" onClick={() => setActiveTab('bookings')} className={`px-5 py-3 rounded-lg text-sm font-semibold ${activeTab === 'bookings' ? 'bg-amber-500 text-black' : 'bg-[#1F2937] text-gray-300'}`}>Bookings</button>
-    </div>
-  );
-
-  if (activeTab === 'bookings') return (
-    <div className="min-h-screen bg-[#111827] py-12 px-4">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">Admin Dashboard</h1>
-        {tabs}
-        <AdminBookingsPanel onInventoryChange={() => { void fetchProducts(); }} />
+  if (!isAdmin) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-5 px-4 text-center">
+        <h1 className="text-2xl font-bold">Administrator Access Required</h1>
+        <Link to="/dashboard" className="text-amber-400">
+          Go to My Account →
+        </Link>
       </div>
-    </div>
-  );
-
-  if (loading) return (
-    <div className="min-h-screen bg-[#111827] flex items-center justify-center">
-      <div className="text-amber-500 text-xl">Loading...</div>
-    </div>
-  );
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[#111827] py-12 px-4">
+    <div className="min-h-screen bg-[#111827] py-10 px-4 text-white">
       <div className="max-w-7xl mx-auto">
-
-        {tabs}
-
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5 mb-7">
           <div>
-            <h1 className="text-4xl font-bold text-white">Admin Dashboard</h1>
-            <p className="text-gray-400 mt-1">Manage your camera equipment</p>
-          </div>
-          <button
-            onClick={() => { setEditProduct(null); setImageFile(null); setImagePreview(''); setForm({ name: '', description: '', category: 'camera', type: 'both', rentPrice: '', sellPrice: '', image: '', available: true }); setShowModal(true); }}
-            className="bg-amber-500 hover:bg-amber-600 text-black font-bold px-6 py-3 rounded-lg"
-          >
-            + Add Product
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-          <div className="bg-[#1F2937] rounded-xl p-6 border border-gray-700">
-            <p className="text-gray-400 text-sm">Total Products</p>
-            <p className="text-4xl font-bold text-white mt-1">{products.length}</p>
-          </div>
-          <div className="bg-[#1F2937] rounded-xl p-6 border border-gray-700">
-            <p className="text-gray-400 text-sm">Available</p>
-            <p className="text-4xl font-bold text-green-400 mt-1">
-              {products.filter((p: any) => p.available).length}
+            <h1 className="text-3xl sm:text-4xl font-bold">
+              Admin Dashboard
+            </h1>
+            <p className="text-gray-400 mt-2">
+              Manage equipment and booking requests.
             </p>
           </div>
-          <div className="bg-[#1F2937] rounded-xl p-6 border border-gray-700">
-            <p className="text-gray-400 text-sm">Categories</p>
-            <p className="text-4xl font-bold text-amber-400 mt-1">4</p>
-          </div>
+
+          {activeTab === 'inventory' && (
+            <button
+              type="button"
+              onClick={openCreate}
+              disabled={!!deletingId}
+              className="rounded-lg bg-amber-500 hover:bg-amber-400 px-5 py-3 font-semibold text-black disabled:opacity-50"
+            >
+              + Add Equipment
+            </button>
+          )}
         </div>
 
-        {/* Products Table */}
-        <div className="bg-[#1F2937] rounded-xl border border-gray-700 overflow-hidden">
-          <div className="p-6 border-b border-gray-700">
-            <h2 className="text-white font-bold text-xl">All Products</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-left text-gray-400 text-sm px-6 py-4">Product</th>
-                  <th className="text-left text-gray-400 text-sm px-6 py-4">Category</th>
-                  <th className="text-left text-gray-400 text-sm px-6 py-4">Rent/day</th>
-                  <th className="text-left text-gray-400 text-sm px-6 py-4">Buy Price</th>
-                  <th className="text-left text-gray-400 text-sm px-6 py-4">Status</th>
-                  <th className="text-left text-gray-400 text-sm px-6 py-4">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((product: any) => (
-                  <tr key={product._id} className="border-b border-gray-700/50 hover:bg-gray-700/20">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={product.image || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=50'}
-                          alt={product.name}
-                          className="w-12 h-12 rounded-lg object-contain"
-                        />
-                        <span className="text-white text-sm font-medium line-clamp-1">{product.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-amber-400 text-sm capitalize">{product.category}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-white text-sm">{product.rentPrice ? `$${product.rentPrice}` : '-'}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-white text-sm">{product.sellPrice ? `$${product.sellPrice}` : '-'}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        product.available ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                      }`}>
-                        {product.available ? 'Available' : 'Unavailable'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        <button onClick={() => handleEdit(product)} className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-xs px-3 py-1 rounded-lg">Edit</button>
-                        <button onClick={() => handleDelete(product._id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs px-3 py-1 rounded-lg">Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div
+          role="group"
+          aria-label="Admin sections"
+          className="flex flex-wrap gap-3 mb-7"
+        >
+          {(['inventory', 'bookings'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              aria-pressed={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-lg px-5 py-3 text-sm font-semibold capitalize ${
+                activeTab === tab
+                  ? 'bg-amber-500 text-black'
+                  : 'bg-[#1F2937] text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
-      </div>
 
-      {/* Add/Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
-          <div className="bg-[#1F2937] rounded-2xl p-6 w-full max-w-lg border border-gray-700 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-white font-bold text-xl mb-6">
-              {editProduct ? 'Edit Product' : 'Add New Product'}
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
+        {activeTab === 'bookings' ? (
+          <AdminBookingsPanel
+            onInventoryChange={() => {
+              void fetchProducts();
+            }}
+          />
+        ) : (
+          <>
+            {notice && (
+              <p
+                role="status"
+                className="mb-5 rounded-lg border border-emerald-600 bg-emerald-500/10 p-4 text-emerald-300"
+              >
+                {notice}
+              </p>
+            )}
 
-              {/* Image Upload */}
-              <div>
-                <label className="block text-gray-300 text-sm mb-2">Product Image</label>
-                <div className="border-2 border-dashed border-gray-600 rounded-xl p-4 text-center hover:border-amber-500 transition-colors">
-                  {imagePreview ? (
-                    <div className="relative">
-                      <img src={imagePreview} alt="Preview" className="w-full h-40 object-contain rounded-lg mb-2" />
-                      <button type="button" onClick={() => { setImagePreview(''); setImageFile(null); setForm(previous => ({ ...previous, image: '' })); }} className="text-red-400 text-xs">Remove Image</button>
-                    </div>
-                  ) : (
-                    <label className="cursor-pointer">
-                      <div className="text-4xl mb-2">📷</div>
-                      <p className="text-gray-400 text-sm">Click to upload image</p>
-                      <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-                    </label>
-                  )}
-                </div>
-              </div>
+            {actionError && (
+              <p
+                role="alert"
+                className="mb-5 rounded-lg border border-red-600 bg-red-500/10 p-4 text-red-300"
+              >
+                {actionError}
+              </p>
+            )}
 
-              <div>
-                <label className="block text-gray-300 text-sm mb-1">Product Name</label>
-                <input type="text" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})}
-                  className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500" required />
-              </div>
-
-              <div>
-                <label className="block text-gray-300 text-sm mb-1">Description</label>
-                <textarea value={form.description} onChange={(e) => setForm({...form, description: e.target.value})}
-                  className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500" rows={3} required />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 text-sm mb-1">Category</label>
-                  <select value={form.category} onChange={(e) => setForm({...form, category: e.target.value})}
-                    className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500">
-                    <option value="camera">Camera</option>
-                    <option value="lens">Lens</option>
-                    <option value="lighting">Lighting</option>
-                    <option value="accessory">Accessory</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-gray-300 text-sm mb-1">Type</label>
-                  <select value={form.type} onChange={(e) => setForm({...form, type: e.target.value})}
-                    className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500">
-                    <option value="rent">Rent Only</option>
-                    <option value="sell">Sell Only</option>
-                    <option value="both">Both</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 text-sm mb-1">Rent Price/day ($)</label>
-                  <input type="number" min="0.01" step="0.01" value={form.rentPrice} onChange={(e) => setForm({...form, rentPrice: e.target.value})}
-                    className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500" />
-                </div>
-                <div>
-                  <label className="block text-gray-300 text-sm mb-1">Sell Price ($)</label>
-                  <input type="number" min="0.01" step="0.01" value={form.sellPrice} onChange={(e) => setForm({...form, sellPrice: e.target.value})}
-                    className="w-full bg-[#111827] border border-gray-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-amber-500" />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input type="checkbox" checked={form.available} onChange={(e) => setForm({...form, available: e.target.checked})} className="w-4 h-4 accent-amber-500" />
-                <label className="text-gray-300 text-sm">Available</label>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowModal(false); setEditProduct(null); }}
-                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded-lg">Cancel</button>
-                <button type="submit" disabled={saving}
-                  className="flex-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-bold py-2 rounded-lg">
-                  {uploading ? 'Uploading...' : saving ? 'Saving...' : editProduct ? 'Update' : 'Add Product'}
+            {loading ? (
+              <p role="status" className="py-16 text-center text-gray-400">
+                Loading inventory...
+              </p>
+            ) : loadError ? (
+              <div
+                role="alert"
+                className="rounded-xl border border-gray-700 bg-[#1F2937] p-8 text-center"
+              >
+                <p className="text-red-300 mb-5">{loadError}</p>
+                <button
+                  type="button"
+                  onClick={() => void fetchProducts()}
+                  className="rounded-lg bg-amber-500 px-5 py-3 font-semibold text-black"
+                >
+                  Retry
                 </button>
               </div>
-            </form>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-7">
+                  {[
+                    { label: 'Total Equipment', value: products.length },
+                    {
+                      label: 'Available Listings',
+                      value: products.filter((product) => product.available)
+                        .length,
+                    },
+                    {
+                      label: 'Categories in Inventory',
+                      value: new Set(
+                        products.map((product) => product.category)
+                      ).size,
+                    },
+                  ].map((stat) => (
+                    <div
+                      key={stat.label}
+                      className="rounded-xl border border-gray-700 bg-[#1F2937] p-5"
+                    >
+                      <p className="text-sm text-gray-400">{stat.label}</p>
+                      <p className="mt-2 text-3xl font-bold text-amber-400">
+                        {stat.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="rounded-xl border border-gray-700 bg-[#1F2937] overflow-hidden">
+                  <div className="flex items-center justify-between gap-4 border-b border-gray-700 p-5">
+                    <h2 className="text-xl font-semibold">Equipment Inventory</h2>
+                    <button
+                      type="button"
+                      disabled={!!deletingId}
+                      onClick={() => void fetchProducts()}
+                      className="text-sm text-amber-400 disabled:opacity-50"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+
+                  {products.length === 0 ? (
+                    <div className="px-4 py-14 text-center">
+                      <p className="font-semibold mb-2">No equipment yet</p>
+                      <p className="text-gray-400 text-sm">
+                        Use Add Equipment to create your first listing.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <caption className="sr-only">
+                          Equipment listings and administrator actions
+                        </caption>
+
+                        <thead className="text-gray-400">
+                          <tr className="border-b border-gray-700">
+                            {[
+                              'Equipment',
+                              'Category',
+                              'Rent / Day',
+                              'Purchase',
+                              'Status',
+                              'Actions',
+                            ].map((heading) => (
+                              <th
+                                key={heading}
+                                scope="col"
+                                className="px-5 py-4 font-medium whitespace-nowrap"
+                              >
+                                {heading}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {products.map((product) => (
+                            <tr
+                              key={product._id}
+                              className="border-b border-gray-700/50 last:border-0 hover:bg-gray-700/20"
+                            >
+                              <td className="px-5 py-4">
+                                <div className="flex items-center gap-3 min-w-48">
+                                  <InventoryImage
+                                    src={product.image}
+                                    name={product.name}
+                                  />
+                                  <Link
+                                    to={`/product/${product._id}`}
+                                    className="font-medium hover:text-amber-400 break-words"
+                                  >
+                                    {product.name}
+                                  </Link>
+                                </div>
+                              </td>
+
+                              <td className="px-5 py-4 capitalize text-amber-400">
+                                {product.category}
+                              </td>
+
+                              <td className="px-5 py-4 whitespace-nowrap">
+                                {product.type !== 'sell'
+                                  ? money(product.rentPrice)
+                                  : '—'}
+                              </td>
+
+                              <td className="px-5 py-4 whitespace-nowrap">
+                                {product.type !== 'rent'
+                                  ? money(product.sellPrice)
+                                  : '—'}
+                              </td>
+
+                              <td className="px-5 py-4">
+                                <span
+                                  className={`rounded-full px-2.5 py-1 text-xs ${
+                                    product.available
+                                      ? 'bg-emerald-500/15 text-emerald-300'
+                                      : 'bg-red-500/15 text-red-300'
+                                  }`}
+                                >
+                                  {product.available
+                                    ? 'Available'
+                                    : 'Unavailable'}
+                                </span>
+                              </td>
+
+                              <td className="px-5 py-4">
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={!!deletingId}
+                                    onClick={() => openEdit(product)}
+                                    aria-label={`Edit ${product.name}`}
+                                    className="rounded-lg bg-blue-500/15 px-3 py-2 text-xs text-blue-300 disabled:opacity-50"
+                                  >
+                                    Edit
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    disabled={!!deletingId}
+                                    onClick={() => void handleDelete(product)}
+                                    aria-label={`Delete ${product.name}`}
+                                    className="rounded-lg bg-red-500/15 px-3 py-2 text-xs text-red-300 disabled:opacity-50"
+                                  >
+                                    {deletingId === product._id
+                                      ? 'Deleting...'
+                                      : 'Delete'}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <p className="mt-4 text-xs text-gray-400 leading-relaxed">
+                  Equipment with booking or review history cannot be
+                  deleted. Edit the listing and mark it unavailable instead.
+                </p>
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      <Modal
+        isOpen={showModal}
+        onClose={closeModal}
+        title={editProduct ? 'Edit Equipment' : 'Add Equipment'}
+        maxWidth="lg"
+      >
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {formError && (
+            <p
+              role="alert"
+              className="rounded-lg border border-red-600 bg-red-500/10 p-3 text-sm text-red-300"
+            >
+              {formError}
+            </p>
+          )}
+
+          <fieldset disabled={saving} className="space-y-5">
+            <div>
+              <label
+                htmlFor="equipment-image"
+                className="block text-sm text-gray-300 mb-2"
+              >
+                Equipment Image
+              </label>
+
+              {imagePreview && (
+                <div className="mb-3">
+                  <img
+                    src={imagePreview}
+                    alt="Equipment preview"
+                    className="h-40 w-full rounded-lg bg-white object-contain p-3"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImageFile(null);
+                      setForm((previous) => ({
+                        ...previous,
+                        image: '',
+                      }));
+                    }}
+                    className="mt-2 text-xs text-red-300"
+                  >
+                    Remove Image
+                  </button>
+                </div>
+              )}
+
+              <input
+                id="equipment-image"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleImageChange}
+                className="block w-full text-sm text-gray-300"
+              />
+
+              <p className="mt-2 text-xs text-gray-400">
+                JPG, PNG or WebP. Maximum 5 MB.
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="equipment-name"
+                className="block text-sm text-gray-300 mb-2"
+              >
+                Equipment Name
+              </label>
+              <input
+                id="equipment-name"
+                type="text"
+                value={form.name}
+                maxLength={150}
+                required
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    name: event.target.value,
+                  }))
+                }
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="equipment-description"
+                className="block text-sm text-gray-300 mb-2"
+              >
+                Description
+              </label>
+              <textarea
+                id="equipment-description"
+                value={form.description}
+                rows={4}
+                maxLength={5000}
+                required
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    description: event.target.value,
+                  }))
+                }
+                className={inputClass}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label
+                  htmlFor="equipment-category"
+                  className="block text-sm text-gray-300 mb-2"
+                >
+                  Category
+                </label>
+                <select
+                  id="equipment-category"
+                  value={form.category}
+                  onChange={(event) =>
+                    setForm((previous) => ({
+                      ...previous,
+                      category: event.target.value as Category,
+                    }))
+                  }
+                  className={inputClass}
+                >
+                  <option value="camera">Camera</option>
+                  <option value="lens">Lens</option>
+                  <option value="lighting">Lighting</option>
+                  <option value="accessory">Accessory</option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="equipment-type"
+                  className="block text-sm text-gray-300 mb-2"
+                >
+                  Listing Type
+                </label>
+                <select
+                  id="equipment-type"
+                  value={form.type}
+                  onChange={(event) =>
+                    setForm((previous) => ({
+                      ...previous,
+                      type: event.target.value as ProductType,
+                    }))
+                  }
+                  className={inputClass}
+                >
+                  <option value="rent">Rent Only</option>
+                  <option value="sell">Sell Only</option>
+                  <option value="both">Rent and Sell</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {form.type !== 'sell' && (
+                <div>
+                  <label
+                    htmlFor="equipment-rent-price"
+                    className="block text-sm text-gray-300 mb-2"
+                  >
+                    Daily Rental Price ($)
+                  </label>
+                  <input
+                    id="equipment-rent-price"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={form.rentPrice}
+                    required
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        rentPrice: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                  />
+                </div>
+              )}
+
+              {form.type !== 'rent' && (
+                <div>
+                  <label
+                    htmlFor="equipment-sell-price"
+                    className="block text-sm text-gray-300 mb-2"
+                  >
+                    Purchase Price ($)
+                  </label>
+                  <input
+                    id="equipment-sell-price"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={form.sellPrice}
+                    required
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        sellPrice: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                  />
+                </div>
+              )}
+            </div>
+
+            <label className="flex items-center gap-3 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={form.available}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    available: event.target.checked,
+                  }))
+                }
+                className="h-4 w-4 accent-amber-500"
+              />
+              Available for new bookings
+            </label>
+          </fieldset>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={closeModal}
+              className="flex-1 rounded-lg bg-gray-700 py-3 font-semibold disabled:opacity-50"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 rounded-lg bg-amber-500 py-3 text-black font-semibold disabled:opacity-50"
+            >
+              {uploading
+                ? 'Uploading...'
+                : saving
+                  ? 'Saving...'
+                  : editProduct
+                    ? 'Save Changes'
+                    : 'Add Equipment'}
+            </button>
           </div>
-        </div>
-      )}
+        </form>
+      </Modal>
     </div>
   );
 }
